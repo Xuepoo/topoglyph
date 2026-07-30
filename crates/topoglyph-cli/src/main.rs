@@ -20,6 +20,18 @@ struct Args {
     #[arg(short = 'H', long, default_value_t = 80)]
     height: usize,
     
+    /// Charset to use: 'lines', 'ascii', 'blocks', 'braille', 'custom'
+    #[arg(short = 'C', long, default_value = "lines")]
+    charset: String,
+
+    /// Custom characters to use when charset is 'custom'
+    #[arg(long, default_value = "")]
+    custom_chars: String,
+
+    /// Path to TTF/OTF font file (required for rasterization)
+    #[arg(long)]
+    font: Option<String>,
+    
     /// Enable plain text mode (no colors)
     #[arg(long, default_value_t = false)]
     no_color: bool,
@@ -42,8 +54,22 @@ fn main() {
     };
     let (out_cols, out_rows, cell_descriptors) = clipping::process_scene(&scene, &grid_opts);
     
-    // 4. Generate built-in GlyphAtlas
-    let atlas = GlyphAtlas::from_text("", &AtlasOptions::default()).unwrap();
+    // 4. Generate GlyphAtlas
+    let atlas = if args.charset == "lines" {
+        GlyphAtlas::from_text("", &AtlasOptions::default()).unwrap()
+    } else {
+        let chars = if args.charset == "custom" {
+            args.custom_chars.clone()
+        } else {
+            GlyphAtlas::get_charset_string(&args.charset)
+                .expect("Invalid charset specified")
+                .to_string()
+        };
+        
+        let font_path = args.font.expect("A --font must be provided for text rasterization");
+        let font_bytes = std::fs::read(&font_path).expect("Failed to read font file");
+        GlyphAtlas::from_custom_font(&chars, &font_bytes, &AtlasOptions::default()).unwrap()
+    };
     
     // 5. Match glyphs
     let canvas = matching::match_scene(out_cols, out_rows, &cell_descriptors, &atlas.glyphs);

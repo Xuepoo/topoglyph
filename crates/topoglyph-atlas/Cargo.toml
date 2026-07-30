@@ -4,4 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+rusttype = "0.9.3"
 topoglyph-core = { path = "../topoglyph-core" }
+unicode-segmentation = "1.13.3"

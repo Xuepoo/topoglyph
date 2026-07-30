@@ -1,6 +1,8 @@
 use topoglyph_core::matching::GlyphDescriptor;
 use std::collections::HashMap;
 use topoglyph_core::geometry::{PortMask, CellMask};
+use rusttype::{Font, Scale, point};
+use unicode_segmentation::UnicodeSegmentation;
 
 pub struct AtlasOptions {
     pub mask_width: u8,
@@ -119,6 +121,73 @@ impl GlyphAtlas {
 
         Ok(Self {
             font_id: "builtin_lines".to_string(),
+            glyphs,
+            index,
+        })
+    }
+
+    pub fn get_charset_string(charset: &str) -> Option<&'static str> {
+        match charset {
+            "ascii" => Some(" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"),
+            "blocks" => Some(" ░▒▓█▄▀▌▐▖▗▘▙▚▛▜▝▞▟"),
+            "braille" => Some(" ⠁⠂⠃⠄⠅⠆⠇⠈⠉⠊⠋⠌⠍⠎⠏⠐⠑⠒⠓⠔⠕⠖⠗⠘⠙⠚⠛⠜⠝⠞⠟⠠⠡⠢⠣⠤⠥⠦⠧⠨⠩⠪⠫⠬⠭⠮⠯⠰⠱⠲⠳⠴⠵⠶⠷⠸⠹⠺⠻⠼⠽⠾⠿"),
+            _ => None
+        }
+    }
+
+    pub fn from_custom_font(text: &str, font_bytes: &[u8], options: &AtlasOptions) -> Result<Self, String> {
+        let font = Font::try_from_bytes(font_bytes).ok_or("Failed to load font")?;
+        let mut glyphs = Vec::new();
+        let scale = Scale {
+            x: options.mask_width as f32,
+            y: options.mask_height as f32,
+        };
+
+        for grapheme in text.graphemes(true) {
+            // Find the primary character to layout
+            let c = grapheme.chars().next().unwrap_or(' ');
+            
+            let v_metrics = font.v_metrics(scale);
+            let offset = point(0.0, v_metrics.ascent);
+            let rust_glyph = font.layout(grapheme, scale, offset).next();
+            
+            let mut mask = CellMask::new();
+            if let Some(g) = rust_glyph {
+                if let Some(bb) = g.pixel_bounding_box() {
+                    g.draw(|x, y, v| {
+                        let px = x as i32 + bb.min.x;
+                        let py = y as i32 + bb.min.y;
+                        if px >= 0 && px < options.mask_width as i32 && py >= 0 && py < options.mask_height as i32 {
+                            if v > 0.1 { // Threshold for density
+                                let bit_idx = (py * options.mask_width as i32 + px) as usize;
+                                mask.words[bit_idx / 64] |= 1 << (bit_idx % 64);
+                            }
+                        }
+                    });
+                }
+            }
+
+            glyphs.push(GlyphDescriptor {
+                token: grapheme.to_string(),
+                cell_width: 1, // Assume 1 for MVP
+                mask,
+                ports: PortMask::empty(), // Not fully implemented for rasterized
+                orientation: [0.0; 8],
+                density: 0.1,
+                centroid: [0.0; 2],
+                curvature: 0.0,
+                stroke_count: 1,
+            });
+        }
+
+        let index = GlyphIndex {
+            by_ports: HashMap::new(),
+            by_density: [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+            by_cell_width: HashMap::new(),
+        };
+
+        Ok(Self {
+            font_id: "custom_font".to_string(),
             glyphs,
             index,
         })
