@@ -59,6 +59,7 @@ bitflags! {
 }
 
 /// Features extracted from a single cell for matching against GlyphAtlas.
+#[derive(Debug, Clone)]
 pub struct CellDescriptor {
     pub mask: CellMask,
     pub ports: PortMask,
