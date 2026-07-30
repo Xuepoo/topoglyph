@@ -59,6 +59,7 @@ pub fn match_scene(columns: usize, rows: usize, cells: &[CellDescriptor], atlas:
                 token: " ".to_string(),
                 score: 0.0,
                 source_path: None,
+                color: None,
             });
             continue;
         }
@@ -86,6 +87,7 @@ pub fn match_scene(columns: usize, rows: usize, cells: &[CellDescriptor], atlas:
             token: best_token,
             score: best_score,
             source_path: None,
+            color: cell.color.clone(),
         });
     }
 

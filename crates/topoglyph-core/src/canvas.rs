@@ -11,4 +11,5 @@ pub struct TextCell {
     pub token: String,
     pub score: f32,
     pub source_path: Option<usize>,
+    pub color: Option<String>,
 }

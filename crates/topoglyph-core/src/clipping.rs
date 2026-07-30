@@ -23,6 +23,7 @@ pub fn process_scene(scene: &PolylineScene, options: &GridOptions) -> (usize, us
             centroid: [0.0; 2],
             curvature: 0.0,
             stroke_count: 0,
+            color: None,
         };
         columns * rows
     ];
@@ -47,7 +48,7 @@ pub fn process_scene(scene: &PolylineScene, options: &GridOptions) -> (usize, us
             let x1 = ((p1.x - bounds.min_x) * scale_x).round() as isize;
             let y1 = ((p1.y - bounds.min_y) * scale_y).round() as isize;
 
-            draw_line(x0, y0, x1, y1, columns, rows, options, &mut cells);
+            draw_line(x0, y0, x1, y1, columns, rows, options, &mut cells, path.color_style.as_deref());
         }
         
         // Handle closed paths
@@ -58,14 +59,14 @@ pub fn process_scene(scene: &PolylineScene, options: &GridOptions) -> (usize, us
             let y0 = ((p0.y - bounds.min_y) * scale_y).round() as isize;
             let x1 = ((p1.x - bounds.min_x) * scale_x).round() as isize;
             let y1 = ((p1.y - bounds.min_y) * scale_y).round() as isize;
-            draw_line(x0, y0, x1, y1, columns, rows, options, &mut cells);
+            draw_line(x0, y0, x1, y1, columns, rows, options, &mut cells, path.color_style.as_deref());
         }
     }
 
     (columns, rows, cells)
 }
 
-fn draw_line(mut x0: isize, mut y0: isize, x1: isize, y1: isize, cols: usize, rows: usize, opts: &GridOptions, cells: &mut Vec<CellDescriptor>) {
+fn draw_line(mut x0: isize, mut y0: isize, x1: isize, y1: isize, cols: usize, rows: usize, opts: &GridOptions, cells: &mut Vec<CellDescriptor>, color: Option<&str>) {
     let dx = (x1 - x0).abs();
     let sx = if x0 < x1 { 1 } else { -1 };
     let dy = -(y1 - y0).abs();
@@ -96,6 +97,10 @@ fn draw_line(mut x0: isize, mut y0: isize, x1: isize, y1: isize, cols: usize, ro
                 if sub_y == (sh - 1) as usize { cells[cell_idx].ports.insert(PortMask::S); }
                 if sub_x == 0 { cells[cell_idx].ports.insert(PortMask::W); }
                 if sub_x == (sw - 1) as usize { cells[cell_idx].ports.insert(PortMask::E); }
+                
+                if let Some(c) = color {
+                    cells[cell_idx].color = Some(c.to_string());
+                }
             }
         }
 

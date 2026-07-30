@@ -3,7 +3,7 @@ use topoglyph::core::geometry::GridOptions;
 use topoglyph::core::clipping;
 use topoglyph::core::matching;
 use topoglyph::atlas::atlas::{GlyphAtlas, AtlasOptions};
-use topoglyph::output::encoder::{TextEncoder, PlainTextEncoder};
+use topoglyph::output::encoder::{TextEncoder, PlainTextEncoder, AnsiEncoder};
 use std::env;
 
 fn main() {
@@ -19,7 +19,7 @@ fn main() {
     let bytes = std::fs::read(filepath).expect("Failed to read file");
     
     // 2. Decode to PolylineScene
-    let scene = adapter::raster_to_scene(&bytes, false).expect("Failed to decode image");
+    let scene = adapter::raster_to_scene(&bytes, true).expect("Failed to decode image");
     
     // 3. Setup Subcell grid clipping
     let grid_opts = GridOptions {
@@ -35,7 +35,7 @@ fn main() {
     let canvas = matching::match_scene(cols, rows, &cell_descriptors, &atlas.glyphs);
     
     // 6. Encode and output
-    let encoder = PlainTextEncoder::new();
+    let encoder = AnsiEncoder::new();
     let out = encoder.encode(&canvas).unwrap();
     
     let text = String::from_utf8(out).unwrap();

@@ -68,4 +68,5 @@ pub struct CellDescriptor {
     pub centroid: [f32; 2],
     pub curvature: f32,
     pub stroke_count: u8,
+    pub color: Option<String>,
 }
