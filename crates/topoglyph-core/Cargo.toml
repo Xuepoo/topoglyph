@@ -1,0 +1,11 @@
+[package]
+name = "topoglyph-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vectomancy-geometry = { workspace = true }
+smallvec = { workspace = true }
+serde = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
+bitflags = { workspace = true }

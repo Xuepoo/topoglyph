@@ -1,6 +1,27 @@
 [package]
 name = "topoglyph"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+authors = ["Xuepoo"]
+description = "Topology-to-Glyph Text-Art Engine"
+
+[workspace]
+members = [
+    "crates/*"
+]
 
 [dependencies]
+topoglyph-atlas = { path = "crates/topoglyph-atlas" }
+topoglyph-core = { path = "crates/topoglyph-core" }
+topoglyph-output = { path = "crates/topoglyph-output" }
+topoglyph-vectomancy = { path = "crates/topoglyph-vectomancy" }
+
+[workspace.dependencies]
+vectomancy-geometry = { path = "../vectomancy/crates/vectomancy-geometry", version = "7.1.2" }
+vectomancy-raster = { path = "../vectomancy/crates/vectomancy-raster", version = "7.1.2" }
+vectomancy-svg = { path = "../vectomancy/crates/vectomancy-svg", version = "7.1.2" }
+
+smallvec = "1.11"
+serde = { version = "1.0", features = ["derive"] }
+rayon = "1.8"
+bitflags = "2.4"

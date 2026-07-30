@@ -1,0 +1,10 @@
+[package]
+name = "topoglyph-vectomancy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vectomancy-geometry = { workspace = true }
+vectomancy-raster = { workspace = true }
+vectomancy-svg = { workspace = true, optional = true }
+topoglyph-core = { path = "../topoglyph-core" }

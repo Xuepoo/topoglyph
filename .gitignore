@@ -1,7 +1,26 @@
-.carryctx/config.local.toml
+# Generated files
+target/
+**/*.rs.bk
+.ruff_cache/
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Test artifacts
+packaging
+
+# IDEs and OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+perf.data
 .worktrees/
-
-
-# Added by cargo
-
-/target
+.agents/
+packaging/
+.carryctx/config.local.toml

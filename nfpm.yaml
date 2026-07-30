@@ -1,0 +1,12 @@
+name: "topoglyph"
+arch: "amd64"
+platform: "linux"
+version: 4.0.2
+section: "default"
+priority: "optional"
+maintainer: "topoglyph developers"
+description: "Topoglyph - Image to vector math CLI"
+license: "MIT"
+contents:
+  - src: ./topoglyph-linux-x86_64
+    dst: /usr/bin/topoglyph
