@@ -1,0 +1,7 @@
+.carryctx/config.local.toml
+.worktrees/
+
+
+# Added by cargo
+
+/target
