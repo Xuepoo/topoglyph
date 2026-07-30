@@ -8,3 +8,4 @@ vectomancy-geometry = { workspace = true }
 vectomancy-raster = { workspace = true }
 vectomancy-svg = { workspace = true, optional = true }
 topoglyph-core = { path = "../topoglyph-core" }
+serde_json = "1.0.151"

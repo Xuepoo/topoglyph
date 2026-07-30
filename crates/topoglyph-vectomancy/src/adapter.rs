@@ -15,3 +15,7 @@ pub fn raster_to_scene(bytes: &[u8], color: bool) -> Result<PolylineScene, Strin
         bounds: BoundingBox::from_points(&points),
     })
 }
+
+pub fn json_to_scene(json: &str) -> Result<PolylineScene, String> {
+    serde_json::from_str(json).map_err(|e| format!("JSON parse error: {:?}", e))
+}
