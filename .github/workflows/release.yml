@@ -161,12 +161,19 @@ jobs:
 
       - name: Publish to crates.io
         run: |
+          crate_exists() {
+            local name=$1
+            local version=$2
+            curl -H "User-Agent: topoglyph-release-ci" -s -o /dev/null -w "%{http_code}" \
+              "https://crates.io/api/v1/crates/$name/$version" | grep -q "^200$"
+          }
+
           wait_for_crate() {
             local name=$1
             local version=$2
             echo "Waiting for $name $version to be available on crates.io..."
             for i in {1..45}; do
-              if curl -H "User-Agent: topoglyph-release-ci" -s -I "https://crates.io/api/v1/crates/$name/$version" | grep -q "HTTP/2 200\|HTTP/1.1 200"; then
+              if crate_exists "$name" "$version"; then
                 echo "$name $version is now available on crates.io."
                 return 0
               fi
@@ -175,6 +182,27 @@ jobs:
             done
             echo "Error: Timeout waiting for $name $version to sync on crates.io."
             return 1
+          }
+
+          # Publishes $1's manifest at $2 unless that exact name@version is
+          # already on crates.io, then waits for it to be resolvable before
+          # returning. This makes the whole publish sequence idempotent: if
+          # a previous run of this job died partway through (as the initial
+          # v0.1.0 attempt did, at the facade step, after core/atlas/output/
+          # vectomancy had already published successfully), re-running the
+          # workflow for the same tag skips the crates that already exist
+          # instead of failing outright with "already exists on crates.io
+          # index" on the very first one.
+          publish_crate() {
+            local name=$1
+            local manifest=$2
+            local version=$3
+            if crate_exists "$name" "$version"; then
+              echo "$name $version already exists on crates.io, skipping publish."
+              return 0
+            fi
+            cargo publish --manifest-path "$manifest" --package "$name" --token ${{ secrets.CRATES_TOKEN }} --no-verify
+            wait_for_crate "$name" "$version"
           }
 
           TAG_NAME="${{ github.ref_name }}"
@@ -188,25 +216,21 @@ jobs:
           # -output/-vectomancy each depend only on topoglyph-core;
           # topoglyph-video depends on all four of those plus the facade;
           # the root `topoglyph` facade re-exports the first four; and
-          # topoglyph-cli depends on the facade. `wait_for_crate` blocks
-          # until each publish is visible on crates.io before the next
-          # `cargo publish` tries to resolve it as a dependency.
+          # topoglyph-cli depends on the facade. `publish_crate` blocks
+          # until each publish is visible on crates.io before the next one
+          # tries to resolve it as a dependency.
 
           # 1. Publish core (no internal deps)
-          cargo publish --manifest-path crates/topoglyph-core/Cargo.toml --package topoglyph-core --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-core" "$VERSION"
+          publish_crate "topoglyph-core" "crates/topoglyph-core/Cargo.toml" "$VERSION"
 
           # 2. Publish atlas (depends on core)
-          cargo publish --manifest-path crates/topoglyph-atlas/Cargo.toml --package topoglyph-atlas --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-atlas" "$VERSION"
+          publish_crate "topoglyph-atlas" "crates/topoglyph-atlas/Cargo.toml" "$VERSION"
 
           # 3. Publish output (depends on core)
-          cargo publish --manifest-path crates/topoglyph-output/Cargo.toml --package topoglyph-output --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-output" "$VERSION"
+          publish_crate "topoglyph-output" "crates/topoglyph-output/Cargo.toml" "$VERSION"
 
           # 4. Publish vectomancy bridge (depends on core)
-          cargo publish --manifest-path crates/topoglyph-vectomancy/Cargo.toml --package topoglyph-vectomancy --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-vectomancy" "$VERSION"
+          publish_crate "topoglyph-vectomancy" "crates/topoglyph-vectomancy/Cargo.toml" "$VERSION"
 
           # 5. Publish video (native-only, depends on core/atlas/output/vectomancy).
           # Must come *before* the facade: even though topoglyph-video is an
@@ -215,16 +239,14 @@ jobs:
           # registry while packaging the facade's manifest, since it's
           # enabled by the facade's own `default = ["video"]`. Publishing
           # the facade first ("no matching package named `topoglyph-video`
-          # found") is exactly what broke the v0.1.0 release.
-          cargo publish --manifest-path crates/topoglyph-video/Cargo.toml --package topoglyph-video --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-video" "$VERSION"
+          # found") is exactly what broke the first v0.1.0 release attempt.
+          publish_crate "topoglyph-video" "crates/topoglyph-video/Cargo.toml" "$VERSION"
 
           # 6. Publish the root facade (depends on core/atlas/output/vectomancy/video)
-          cargo publish --manifest-path Cargo.toml --package topoglyph --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph" "$VERSION"
+          publish_crate "topoglyph" "Cargo.toml" "$VERSION"
 
           # 7. Publish cli (depends on the facade)
-          cargo publish --manifest-path crates/topoglyph-cli/Cargo.toml --package topoglyph-cli --token ${{ secrets.CRATES_TOKEN }} --no-verify
+          publish_crate "topoglyph-cli" "crates/topoglyph-cli/Cargo.toml" "$VERSION"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
 
