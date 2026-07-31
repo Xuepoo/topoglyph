@@ -233,7 +233,7 @@ impl Default for MatchOptions {
 
 #[inline]
 fn mask_distance(a: &CellMask, b: &CellMask) -> f32 {
-    a.xor_distance(b) as f32
+    a.iou_distance(b)
 }
 
 /// Euclidean distance between two already-normalized 8-bin orientation

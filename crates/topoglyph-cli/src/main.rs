@@ -2,7 +2,7 @@ use clap::{Args as ClapArgs, Parser, Subcommand};
 use std::io::Write;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
-use topoglyph::atlas::atlas::{AtlasOptions, GlyphAtlas};
+use topoglyph::atlas::atlas::{AtlasOptions, GlyphAtlas, GlyphIndex};
 use topoglyph::core::clipping;
 use topoglyph::core::geometry::GridOptions;
 use topoglyph::core::matching::{self, MatchOptions, MatchWeights};
@@ -261,6 +261,19 @@ fn build_atlas(
     if charset == "lines" {
         GlyphAtlas::from_text("", &AtlasOptions::default())
             .map_err(|e| format!("Failed to build built-in glyph atlas: {e}"))
+    } else if font.is_none() && charset != "custom" {
+        let glyphs = match charset {
+            "ascii" => topoglyph::atlas::precomputed::build_ascii_glyphs(),
+            "blocks" => topoglyph::atlas::precomputed::build_blocks_glyphs(),
+            "braille" => topoglyph::atlas::precomputed::build_braille_glyphs(),
+            _ => return Err(format!("Invalid charset specified: '{charset}'")),
+        };
+        let index = GlyphIndex::build(&glyphs);
+        Ok(GlyphAtlas {
+            font_id: format!("precomputed_{charset}"),
+            glyphs,
+            index,
+        })
     } else {
         let chars = if charset == "custom" {
             custom_chars.to_string()
@@ -272,7 +285,7 @@ fn build_atlas(
 
         let font_path = font
             .clone()
-            .ok_or_else(|| "A --font must be provided for text rasterization".to_string())?;
+            .ok_or_else(|| "A --font must be provided for custom text rasterization".to_string())?;
         let font_bytes = std::fs::read(&font_path)
             .map_err(|e| format!("Failed to read font file '{font_path}': {e}"))?;
         GlyphAtlas::from_custom_font(&chars, &font_bytes, &AtlasOptions::default())

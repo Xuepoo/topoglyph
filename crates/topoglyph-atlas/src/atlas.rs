@@ -197,6 +197,38 @@ impl GlyphAtlas {
             draw_line_mask(hw, hh, 15, hh, m);
         });
 
+        // "╳" (Diagonal cross)
+        add_glyph!(
+            "╳",
+            PortMask::NE | PortMask::NW | PortMask::SE | PortMask::SW,
+            |m: &mut CellMask| {
+                draw_line_mask(0, 31, 15, 0, m);
+                draw_line_mask(0, 0, 15, 31, m);
+            }
+        );
+
+        // Sharp corners (geometrically identical to the rounded ones in this
+        // 1px-wide Bresenham implementation, giving the engine more variety).
+        // "┌"
+        add_glyph!("┌", PortMask::S | PortMask::E, |m: &mut CellMask| {
+            draw_line_mask(hw, 31, hw, hh, m);
+            draw_line_mask(hw, hh, 15, hh, m);
+        });
+        // "┐"
+        add_glyph!("┐", PortMask::S | PortMask::W, |m: &mut CellMask| {
+            draw_line_mask(hw, 31, hw, hh, m);
+            draw_line_mask(hw, hh, 0, hh, m);
+        });
+        // "└"
+        add_glyph!("└", PortMask::N | PortMask::E, |m: &mut CellMask| {
+            draw_line_mask(hw, 0, hw, hh, m);
+            draw_line_mask(hw, hh, 15, hh, m);
+        });
+        // "┘"
+        add_glyph!("┘", PortMask::N | PortMask::W, |m: &mut CellMask| {
+            draw_line_mask(hw, 0, hw, hh, m);
+            draw_line_mask(hw, hh, 0, hh, m);
+        });
         // Deliberately no isolated "point"/speck glyph: mask XOR distance
         // rewards fewer set bits almost unconditionally, so a near-empty
         // 1-bit mask wins the shape term against *any* sparse cell
@@ -514,7 +546,7 @@ mod tests {
         let atlas = GlyphAtlas::from_text("", &AtlasOptions::default()).unwrap();
         let find = |token: &str| atlas.glyphs.iter().find(|g| g.token == token);
 
-        assert_eq!(atlas.glyphs.len(), 17, "expected 9 original + 8 new glyphs");
+        assert_eq!(atlas.glyphs.len(), 22, "expected 9 original + 8 new + 5 expanded glyphs");
 
         let tee_east = find("├").expect("├ should be in the built-in atlas");
         assert_eq!(

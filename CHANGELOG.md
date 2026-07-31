@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-31
+
+### Added
+- **Expanded built-in line atlas**: Increased from 17 to 22 glyphs. Added the diagonal cross (`╳`) and sharp corners (`┌`, `┐`, `└`, `┘`) to provide more variety and geometric matching options for the default `lines` charset.
+- **Embedded Minimal Glyphs (CLI)**: Added zero-configuration, "out-of-the-box" support for standard charsets (`ascii`, `blocks`, `braille`). Pre-computed mask and feature data are now embedded directly into the binary, completely removing the requirement for users to manually supply a `--font` path for these core charsets.
+
+### Changed
+- **Core Matching Metric (Sparsity Bias Fix)**: Replaced the raw XOR distance `(a ^ b).count_ones()` with the Jaccard distance / Intersection over Union (IoU) metric for the `mask_distance` feature. This fixes a severe systemic "sparsity bias" where sparse glyphs like half-lines (`╶`, `╴`) overwhelmingly won out over structurally correct dense glyphs (like corners or full lines) due to missing normalization.
+
 ## [0.1.0] - 2026-07-31
 
 First real release. Converts a raster image into topology-matched

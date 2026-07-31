@@ -42,6 +42,21 @@ impl CellMask {
             .sum()
     }
 
+    /// Calculate the Jaccard distance (1.0 - Intersection over Union) between two masks.
+    /// If both masks are empty, the distance is 0.0 (perfect match).
+    pub fn iou_distance(&self, other: &Self) -> f32 {
+        let mut intersection = 0;
+        let mut union = 0;
+        for (x, y) in self.words.iter().zip(&other.words) {
+            intersection += (x & y).count_ones();
+            union += (x | y).count_ones();
+        }
+        if union == 0 {
+            return 0.0;
+        }
+        1.0 - (intersection as f32 / union as f32)
+    }
+
     /// Reads the bit at flat index `bit_idx` (`y * width + x`). Out-of-range
     /// indices (beyond the mask's 512 bits) read as unset rather than
     /// panicking, so callers can iterate a caller-supplied `width`/`height`
