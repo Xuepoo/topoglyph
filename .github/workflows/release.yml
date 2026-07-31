@@ -208,13 +208,20 @@ jobs:
           cargo publish --manifest-path crates/topoglyph-vectomancy/Cargo.toml --package topoglyph-vectomancy --token ${{ secrets.CRATES_TOKEN }} --no-verify
           wait_for_crate "topoglyph-vectomancy" "$VERSION"
 
-          # 5. Publish the root facade (depends on core/atlas/output/vectomancy)
-          cargo publish --manifest-path Cargo.toml --package topoglyph --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph" "$VERSION"
-
-          # 6. Publish video (native-only, depends on core/atlas/output/vectomancy)
+          # 5. Publish video (native-only, depends on core/atlas/output/vectomancy).
+          # Must come *before* the facade: even though topoglyph-video is an
+          # optional dependency of the facade (gated behind the "video"
+          # feature), `cargo publish` still needs to resolve it against the
+          # registry while packaging the facade's manifest, since it's
+          # enabled by the facade's own `default = ["video"]`. Publishing
+          # the facade first ("no matching package named `topoglyph-video`
+          # found") is exactly what broke the v0.1.0 release.
           cargo publish --manifest-path crates/topoglyph-video/Cargo.toml --package topoglyph-video --token ${{ secrets.CRATES_TOKEN }} --no-verify
           wait_for_crate "topoglyph-video" "$VERSION"
+
+          # 6. Publish the root facade (depends on core/atlas/output/vectomancy/video)
+          cargo publish --manifest-path Cargo.toml --package topoglyph --token ${{ secrets.CRATES_TOKEN }} --no-verify
+          wait_for_crate "topoglyph" "$VERSION"
 
           # 7. Publish cli (depends on the facade)
           cargo publish --manifest-path crates/topoglyph-cli/Cargo.toml --package topoglyph-cli --token ${{ secrets.CRATES_TOKEN }} --no-verify
