@@ -546,7 +546,11 @@ mod tests {
         let atlas = GlyphAtlas::from_text("", &AtlasOptions::default()).unwrap();
         let find = |token: &str| atlas.glyphs.iter().find(|g| g.token == token);
 
-        assert_eq!(atlas.glyphs.len(), 22, "expected 9 original + 8 new + 5 expanded glyphs");
+        assert_eq!(
+            atlas.glyphs.len(),
+            22,
+            "expected 9 original + 8 new + 5 expanded glyphs"
+        );
 
         let tee_east = find("├").expect("├ should be in the built-in atlas");
         assert_eq!(
