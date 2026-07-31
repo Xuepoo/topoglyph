@@ -201,7 +201,7 @@ jobs:
               echo "$name $version already exists on crates.io, skipping publish."
               return 0
             fi
-            cargo publish --manifest-path "$manifest" --package "$name" --token ${{ secrets.CRATES_TOKEN }} --no-verify
+            cargo publish --manifest-path "$manifest" --package "$name" --token ${{ secrets.CRATES_TOKEN }} --no-verify --allow-dirty
             wait_for_crate "$name" "$version"
           }
 
