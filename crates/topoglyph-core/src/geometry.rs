@@ -41,6 +41,39 @@ impl CellMask {
             .map(|(x, y)| (x ^ y).count_ones())
             .sum()
     }
+
+    /// Reads the bit at flat index `bit_idx` (`y * width + x`). Out-of-range
+    /// indices (beyond the mask's 512 bits) read as unset rather than
+    /// panicking, so callers can iterate a caller-supplied `width`/`height`
+    /// without needing to separately validate it fits the fixed-size mask.
+    #[inline]
+    pub fn get_bit(&self, bit_idx: usize) -> bool {
+        let word = bit_idx / 64;
+        let offset = bit_idx % 64;
+        match self.words.get(word) {
+            Some(w) => (w >> offset) & 1 != 0,
+            None => false,
+        }
+    }
+
+    /// Reads the bit at 2D coordinate `(x, y)` in a mask laid out row-major
+    /// with the given `width`.
+    #[inline]
+    pub fn get(&self, x: usize, y: usize, width: usize) -> bool {
+        self.get_bit(y * width + x)
+    }
+
+    /// Total number of set bits in the mask.
+    #[inline]
+    pub fn popcount(&self) -> u32 {
+        self.words.iter().map(|w| w.count_ones()).sum()
+    }
+}
+
+impl Default for CellMask {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 bitflags! {

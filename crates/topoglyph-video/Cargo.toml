@@ -1,0 +1,18 @@
+[package]
+name = "topoglyph-video"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Video/frame-sequence to TopoGlyph animation format (.tglyph) conversion"
+
+[dependencies]
+vectomancy-video = { workspace = true }
+image = { version = "0.25", features = ["webp"] }
+rayon = { workspace = true }
+thiserror = "1.0"
+topoglyph-core = { workspace = true }
+topoglyph-atlas = { workspace = true }
+topoglyph-vectomancy = { workspace = true }
+topoglyph-output = { workspace = true }
