@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-07-31
+
+First real release. Converts a raster image into topology-matched
+text art via subcell grid analysis, with a small built-in glyph atlas
+and support for custom TTF/OTF fonts, video-to-`.tglyph` animation
+conversion, and multiple output formats.
 
 ### Added
 
@@ -20,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Debug/HTML encoders**: Added `JsonDebugEncoder` (full per-cell match data including scores), `HtmlEncoder`, and `DebugSvgEncoder` alongside the existing Plain Text/ANSI encoders.
 - **Expanded built-in line atlas**: Grew from 9 to 17 glyphs (added T-junctions and half-length stroke stubs), fixing a pathology where any branching or partial-length stroke had no better match than a full 2-port line or the single 4-port cross.
 - **`topoglyph-cli render`/`atlas inspect` subcommand structure**: The CLI now has explicit `render`/`atlas` subcommands (plus `video`/`play` above), with argv pre-processing so `topoglyph <image.png> ...` still works without a subcommand.
+- **Multi-column (CJK/Emoji) glyph layout**: `cell_width` is no longer just metadata. Pool construction excludes any glyph that wouldn't fit in the remaining columns of its row, and the final canvas-building pass lets a wide winner's right-hand neighbor cell(s) render empty rather than being independently matched — a CJK ideograph or Emoji now actually spans two grid columns instead of being squeezed into one.
+- **`GlyphIndex`-backed pool construction**: `match_scene_indexed` (a new sibling of `match_scene_full`) takes an optional `&GlyphIndex` and narrows the per-cell candidate scan via `glyphs_fitting_in`'s `by_cell_width` buckets instead of linearly scanning the whole atlas. `GlyphIndex` moved from `topoglyph-atlas` to `topoglyph-core::matching` (re-exported from `topoglyph-atlas` for source compatibility) so the consumer and the type live on the same side of the dependency graph. `topoglyph-cli` and `topoglyph-video` both use the indexed path now.
 
 ### Changed
 
@@ -34,7 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Cargo.toml`'s `[workspace]` had no `default-members`, so plain `cargo test`/`cargo clippy`/`cargo build` (as run by `.github/workflows/ci.yml`, with no `--workspace`/`-p`) only covered the root `topoglyph` facade package — which has no tests of its own — silently running zero tests in CI despite `cargo test --workspace` reporting dozens passing locally. Fixed by adding an explicit `default-members` list covering every crate.
 - Removed the repo-committed `.cargo/config.toml` (`rustflags = ["-C", "target-cpu=native", ...]`). This was originally added to work around a local wasm build issue, but the actual fix needed was a linker choice (`mold`), which belongs in a developer's own global Cargo config (`$CARGO_HOME/config.toml`), not the repository — `target-cpu=native` itself is not required for any `wasm32-unknown-unknown` build in this workspace (verified by building `topoglyph-core`/`-atlas`/`-output`/`-vectomancy` for that target with a clean `CARGO_HOME` and no repo-level Cargo config), and shipping it in the repo would have made `release.yml`'s cross-platform binaries potentially crash (`SIGILL`) on any user CPU lacking whatever instruction-set extensions the CI runner's CPU happens to support.
 
-## [0.1.0] - initial workspace scaffold
+## [0.0.0] - pre-release scaffold
+
+Never tagged/published; kept here only as a historical record of the
+starting point the `[0.1.0]` work above built on.
 
 ### Added
 
