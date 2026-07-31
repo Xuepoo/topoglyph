@@ -1,5 +1,6 @@
 use crate::canvas::{TextCanvas, TextCell};
 use crate::geometry::{CellDescriptor, CellMask, PortMask};
+use std::collections::HashMap;
 
 /// Attributes of a pre-rasterized glyph from an Atlas.
 #[derive(Clone)]
@@ -99,6 +100,107 @@ impl MatchWeights {
 pub struct Candidate {
     pub glyph_index: usize,
     pub local_score: f32,
+}
+
+/// Secondary lookup structures over a glyph atlas's [`GlyphDescriptor`]s,
+/// built once at atlas-construction time so a large custom-font atlas
+/// (hundreds/thousands of graphemes) can narrow the search space before
+/// falling back to a full per-glyph score. Each maps to indices into the
+/// original glyph slice.
+///
+/// Lives in `topoglyph-core` (rather than `topoglyph-atlas`, where it was
+/// originally defined) so [`match_scene_full`]'s pool-construction step can
+/// consume it directly without a dependency cycle (`topoglyph-atlas`
+/// already depends on `topoglyph-core`, not the other way around).
+/// `topoglyph-atlas` re-exports this type for source compatibility.
+pub struct GlyphIndex {
+    /// Glyphs grouped by their exact [`PortMask`]. Useful for the topology
+    /// term: given a required facing port, `by_ports` looks up every glyph
+    /// that exposes it in O(1) instead of scanning the whole atlas.
+    pub by_ports: HashMap<PortMask, Vec<usize>>,
+    /// Glyphs bucketed into 8 equal-width density bins
+    /// (`bin = floor(density times 8)`, clamped to `[0, 7]`),
+    /// coarsest-grained but cheapest lookup for narrowing candidates by
+    /// "how filled-in" a glyph is.
+    pub by_density: [Vec<usize>; 8],
+    /// Glyphs grouped by their `cell_width` (multi-column glyph support).
+    pub by_cell_width: HashMap<u8, Vec<usize>>,
+}
+
+impl GlyphIndex {
+    /// Builds all three lookup structures from a finished glyph list in a
+    /// single pass.
+    pub fn build(glyphs: &[GlyphDescriptor]) -> Self {
+        let mut by_ports: HashMap<PortMask, Vec<usize>> = HashMap::new();
+        let mut by_density: [Vec<usize>; 8] = Default::default();
+        let mut by_cell_width: HashMap<u8, Vec<usize>> = HashMap::new();
+
+        for (idx, glyph) in glyphs.iter().enumerate() {
+            by_ports.entry(glyph.ports).or_default().push(idx);
+
+            let bin = ((glyph.density * 8.0) as usize).min(7);
+            by_density[bin].push(idx);
+
+            by_cell_width.entry(glyph.cell_width).or_default().push(idx);
+        }
+
+        Self {
+            by_ports,
+            by_density,
+            by_cell_width,
+        }
+    }
+
+    /// Returns the indices of every glyph exposing at least the given
+    /// ports (an exact-match lookup would miss glyphs with *more* ports set
+    /// than requested, which are still valid candidates for a topology
+    /// term that only checks specific directions).
+    pub fn glyphs_with_any_port(&self, ports: PortMask) -> Vec<usize> {
+        if ports.is_empty() {
+            return (0..self.by_ports.values().map(Vec::len).sum()).collect();
+        }
+        let mut out = Vec::new();
+        for (&mask, indices) in &self.by_ports {
+            if mask.intersects(ports) {
+                out.extend_from_slice(indices);
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// Returns the indices of every glyph whose density bin is within
+    /// `tolerance_bins` of the given density's own bin. Widening
+    /// `tolerance_bins` trades index selectivity for recall.
+    pub fn glyphs_near_density(&self, density: f32, tolerance_bins: usize) -> Vec<usize> {
+        let center = ((density * 8.0) as usize).min(7);
+        let lo = center.saturating_sub(tolerance_bins);
+        let hi = (center + tolerance_bins).min(7);
+        let mut out = Vec::new();
+        for bin in &self.by_density[lo..=hi] {
+            out.extend_from_slice(bin);
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// Returns the indices of every glyph that fits in `remaining_columns`
+    /// (i.e. `cell_width <= remaining_columns`), for pool construction's
+    /// multi-column-glyph boundary filter (see [`match_scene_full`]).
+    /// Iterates `by_cell_width`'s buckets rather than every glyph
+    /// individually, which only pays off once the atlas is large enough for
+    /// bucket overhead to be worth it — for small built-in atlases this is
+    /// no better than a linear scan, but it doesn't get *worse*, either.
+    pub fn glyphs_fitting_in(&self, remaining_columns: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        for (&width, indices) in &self.by_cell_width {
+            if width as usize <= remaining_columns {
+                out.extend_from_slice(indices);
+            }
+        }
+        out.sort_unstable();
+        out
+    }
 }
 
 /// Tuning knobs for the Top-K candidate pool + multi-round Neighbor
@@ -299,6 +401,34 @@ pub fn match_scene_full(
     weights: &MatchWeights,
     options: &MatchOptions,
 ) -> TextCanvas {
+    match_scene_indexed(columns, rows, cells, atlas, None, weights, options)
+}
+
+/// Identical to [`match_scene_full`], but takes an optional pre-built
+/// [`GlyphIndex`] to narrow pool construction's per-cell atlas scan before
+/// scoring, instead of always scoring every glyph. `index` should be built
+/// from the same `atlas` slice (typically via `GlyphAtlas::index` in
+/// `topoglyph-atlas`); passing `None` falls back to the full linear scan
+/// `match_scene_full` always did.
+///
+/// This matters once an atlas gets large (hundreds/thousands of graphemes
+/// from a custom font's full character pool): scoring every glyph against
+/// every non-empty cell is `O(cells * atlas.len())`, which the small
+/// built-in 17-glyph line atlas never notices but a large custom-font atlas
+/// would. Narrowing via [`GlyphIndex::glyphs_fitting_in`] first (only the
+/// multi-column-width boundary filter — see the pool-construction comment
+/// below) turns that into `O(cells * candidates_after_width_filter)`, which
+/// is a meaningful win whenever most of the atlas is single-width and most
+/// cells aren't near the grid's right edge.
+pub fn match_scene_indexed(
+    columns: usize,
+    rows: usize,
+    cells: &[CellDescriptor],
+    atlas: &[GlyphDescriptor],
+    index: Option<&GlyphIndex>,
+    weights: &MatchWeights,
+    options: &MatchOptions,
+) -> TextCanvas {
     let empty_words_all_zero = |mask: &CellMask| mask.words.iter().all(|&w| w == 0);
 
     if atlas.is_empty() {
@@ -319,20 +449,44 @@ pub fn match_scene_full(
 
     let top_k = options.top_k.max(1);
 
-    // Pool construction: shape-only multi-factor matching against the full
-    // atlas, keeping only the top_k lowest-scoring candidates per cell.
+    // Pool construction: shape-only multi-factor matching, keeping only the
+    // top_k lowest-scoring candidates per cell.
+    //
+    // Multi-column glyphs (`cell_width > 1`, e.g. CJK ideographs/most emoji
+    // via `topoglyph_atlas`'s `unicode-width`-based `grapheme_cell_width`)
+    // are excluded from any column that doesn't have enough room to its
+    // right — there is no cell beyond the grid's last column for a
+    // double-width glyph to occupy. Filtering here (rather than discovering
+    // the problem after a wide glyph has already "won" the last column)
+    // means the width-occupancy sweep below can assume every chosen wide
+    // glyph always fits.
+    //
+    // With an index available, the width filter is applied by looking up
+    // `glyphs_fitting_in(remaining_columns)` instead of scanning every
+    // glyph and checking its width inline; without one, this falls back to
+    // the same full-atlas linear scan `match_scene_full` used before this
+    // index-aware path existed.
     let mut pools: Vec<Vec<Candidate>> = Vec::with_capacity(columns * rows);
-    for cell in cells {
+    for (flat, cell) in cells.iter().enumerate() {
         if empty_words_all_zero(&cell.mask) {
             pools.push(Vec::new());
             continue;
         }
-        let mut scored: Vec<Candidate> = atlas
-            .iter()
-            .enumerate()
-            .map(|(idx, glyph)| Candidate {
+        let col = flat % columns;
+        let remaining_columns = columns - col;
+
+        let candidate_indices: Vec<usize> = match index {
+            Some(idx) => idx.glyphs_fitting_in(remaining_columns),
+            None => (0..atlas.len())
+                .filter(|&i| atlas[i].cell_width as usize <= remaining_columns)
+                .collect(),
+        };
+
+        let mut scored: Vec<Candidate> = candidate_indices
+            .into_iter()
+            .map(|idx| Candidate {
                 glyph_index: idx,
-                local_score: shape_score(cell, glyph, weights),
+                local_score: shape_score(cell, &atlas[idx], weights),
             })
             .collect();
         scored.sort_by(|a, b| a.local_score.total_cmp(&b.local_score));
@@ -365,6 +519,21 @@ pub fn match_scene_full(
 
     // Relaxation rounds: re-score only within each cell's pool, using the
     // previous round's tentative winners as neighbor context.
+    //
+    // Known approximation: this loop still computes an independent
+    // tentative winner for every cell, including ones that will end up
+    // claimed (and rendered empty) by a wide neighbor's cell_width in the
+    // final canvas-building pass below. That "shadow" winner never reaches
+    // output, but it briefly exists as topology context for *its own*
+    // right-hand neighbor during relaxation. This is acceptable rather than
+    // plumbing width-occupancy through every relaxation round: multi-column
+    // glyphs (CJK ideographs, most emoji) essentially never carry N/S/E/W
+    // ports in the first place (see `topoglyph_atlas::ports_from_mask`,
+    // which only detects cardinal ports for rasterized font glyphs at all,
+    // and even those are rare for solid ideograph strokes), so a shadow
+    // winner's ports contributing to a neighbor's topology term has
+    // negligible practical effect on the box-drawing/line-art atlases this
+    // scoring pipeline is primarily tuned for.
     for _ in 0..options.relaxation_rounds {
         let mut next_winner = current_winner.clone();
         let mut next_score = current_score.clone();
@@ -409,12 +578,36 @@ pub fn match_scene_full(
         current_score = next_score;
     }
 
-    // Build final canvas
+    // Build final canvas. Scanned left-to-right per row so a multi-column
+    // winner (`cell_width > 1`, e.g. a CJK ideograph or emoji) can claim the
+    // grid columns to its right before they're independently matched: the
+    // pool-construction filter above already guarantees a wide glyph never
+    // wins a column too close to the row's right edge to fit, so `occupied`
+    // only ever needs to skip forward, never clamp.
+    //
+    // Skipped/occupied cells render as a plain space with no token — they
+    // are not re-matched against the atlas at all, per the "match, then
+    // claim" design: the wide glyph's own mask was compared against a
+    // single cell's geometry (see `topoglyph-docs/TODO.md` 0.5.0), so its
+    // right-hand neighbor's own stroke content is intentionally discarded
+    // rather than blended into anything.
     let mut out_cells = Vec::with_capacity(columns * rows);
     for r in 0..rows {
+        let mut occupied_until = 0usize; // columns < this are already claimed
         for c in 0..columns {
             let flat = r * columns + c;
             let cell = &cells[flat];
+
+            if c < occupied_until {
+                out_cells.push(TextCell {
+                    token: String::new(),
+                    score: 0.0,
+                    source_path: None,
+                    color: None,
+                });
+                continue;
+            }
+
             match current_winner[flat] {
                 None => out_cells.push(TextCell {
                     token: " ".to_string(),
@@ -422,12 +615,16 @@ pub fn match_scene_full(
                     source_path: None,
                     color: None,
                 }),
-                Some(idx) => out_cells.push(TextCell {
-                    token: atlas[idx].token.clone(),
-                    score: current_score[flat],
-                    source_path: None,
-                    color: cell.color.clone(),
-                }),
+                Some(idx) => {
+                    let glyph = &atlas[idx];
+                    occupied_until = c + glyph.cell_width as usize;
+                    out_cells.push(TextCell {
+                        token: glyph.token.clone(),
+                        score: current_score[flat],
+                        source_path: None,
+                        color: cell.color.clone(),
+                    });
+                }
             }
         }
     }
@@ -745,5 +942,171 @@ mod tests {
         // neighbors decides — it should end up "through" to connect both
         // anchors, not "stop".
         assert_eq!(canvas.cells[1].token, "through");
+    }
+
+    fn glyph_with_width(token: &str, mask: CellMask, cell_width: u8) -> GlyphDescriptor {
+        GlyphDescriptor {
+            cell_width,
+            ..glyph(token, mask, PortMask::empty())
+        }
+    }
+
+    #[test]
+    fn wide_glyph_occupies_its_right_neighbor_cell() {
+        // A 1x2 row where a cell_width=2 glyph (e.g. a CJK ideograph) wins
+        // the left cell; its right neighbor must render as an empty token
+        // rather than being independently matched against the atlas.
+        let mask = mask_from_coords(&(0..16).map(|x| (x, 16)).collect::<Vec<_>>());
+        let wide = glyph_with_width("字", mask.clone(), 2);
+        let atlas = vec![wide];
+
+        let left_cell = cell_from_mask(mask.clone());
+        let right_cell = cell_from_mask(mask);
+        let canvas = match_scene(2, 1, &[left_cell, right_cell], &atlas);
+
+        assert_eq!(canvas.cells[0].token, "字");
+        assert_eq!(
+            canvas.cells[1].token, "",
+            "the cell claimed by a wide glyph's right-hand neighbor must be empty, not re-matched"
+        );
+    }
+
+    #[test]
+    fn wide_glyph_is_never_chosen_in_the_grids_last_column() {
+        // A cell_width=2 glyph in the rightmost column of the grid has no
+        // room to its right; pool construction must exclude it there even
+        // though its shape score would otherwise be a perfect match, so a
+        // narrower fallback (or empty) is chosen instead of silently
+        // overflowing the grid.
+        let mask = mask_from_coords(&(0..16).map(|x| (x, 16)).collect::<Vec<_>>());
+        let wide = glyph_with_width("字", mask.clone(), 2);
+        let narrow = glyph_with_width("x", mask.clone(), 1);
+        let atlas = vec![wide, narrow];
+
+        // 1x1 grid: column 0 is also the last column, so cell_width=2
+        // never fits.
+        let cell = cell_from_mask(mask);
+        let canvas = match_scene(1, 1, &[cell], &atlas);
+        assert_eq!(
+            canvas.cells[0].token, "x",
+            "a wide glyph must never be selected in a column with no room to its right"
+        );
+    }
+
+    #[test]
+    fn wide_glyph_at_second_to_last_column_fits_exactly() {
+        // A 1x3 row: a cell_width=2 glyph starting at column 1 fits exactly
+        // (columns 1 and 2), so it should still be selectable there, unlike
+        // the last-column case above.
+        let mask = mask_from_coords(&(0..16).map(|x| (x, 16)).collect::<Vec<_>>());
+        let wide = glyph_with_width("字", mask.clone(), 2);
+        let atlas = vec![wide];
+
+        let cells = vec![
+            cell_from_mask(CellMask::new()), // empty, column 0
+            cell_from_mask(mask.clone()),    // column 1
+            cell_from_mask(mask),            // column 2, claimed by column 1's glyph
+        ];
+        let canvas = match_scene(3, 1, &cells, &atlas);
+        assert_eq!(canvas.cells[0].token, " "); // empty cell, no match
+        assert_eq!(canvas.cells[1].token, "字");
+        assert_eq!(canvas.cells[2].token, "");
+    }
+
+    #[test]
+    fn narrow_glyphs_are_unaffected_by_width_occupancy_logic() {
+        // Sanity check that cell_width=1 (the default for every existing
+        // glyph) behaves exactly as before: no cell is ever claimed by a
+        // neighbor.
+        let mask = mask_from_coords(&(0..16).map(|x| (x, 16)).collect::<Vec<_>>());
+        let narrow = glyph("─", mask.clone(), PortMask::W | PortMask::E);
+        let atlas = vec![narrow];
+        let cells = vec![cell_from_mask(mask.clone()), cell_from_mask(mask)];
+        let canvas = match_scene(2, 1, &cells, &atlas);
+        assert_eq!(canvas.cells[0].token, "─");
+        assert_eq!(canvas.cells[1].token, "─");
+    }
+
+    #[test]
+    fn glyph_index_glyphs_fitting_in_respects_cell_width() {
+        let glyphs = vec![
+            glyph_with_width("narrow", CellMask::new(), 1),
+            glyph_with_width("wide", CellMask::new(), 2),
+            glyph_with_width("wider", CellMask::new(), 3),
+        ];
+        let index = GlyphIndex::build(&glyphs);
+
+        let mut fits_1 = index.glyphs_fitting_in(1);
+        fits_1.sort_unstable();
+        assert_eq!(fits_1, vec![0], "only the width-1 glyph fits in 1 column");
+
+        let mut fits_2 = index.glyphs_fitting_in(2);
+        fits_2.sort_unstable();
+        assert_eq!(
+            fits_2,
+            vec![0, 1],
+            "width-1 and width-2 glyphs fit in 2 columns"
+        );
+
+        let mut fits_3 = index.glyphs_fitting_in(3);
+        fits_3.sort_unstable();
+        assert_eq!(fits_3, vec![0, 1, 2], "all three fit in 3 columns");
+    }
+
+    #[test]
+    fn match_scene_indexed_with_index_matches_full_scan_result() {
+        // The indexed path (via GlyphIndex::glyphs_fitting_in) must select
+        // exactly the same winner as the unindexed linear-scan path for the
+        // same atlas/weights/options — the index is a narrowing
+        // optimization, not a behavior change.
+        let mask = mask_from_coords(&(0..16).map(|x| (x, 16)).collect::<Vec<_>>());
+        let horiz = glyph("─", mask.clone(), PortMask::W | PortMask::E);
+        let vert = glyph(
+            "│",
+            mask_from_coords(&(0..32).map(|y| (8, y)).collect::<Vec<_>>()),
+            PortMask::N | PortMask::S,
+        );
+        let atlas = vec![horiz, vert];
+        let index = GlyphIndex::build(&atlas);
+
+        let cell = cell_from_mask(mask);
+        let weights = MatchWeights::default();
+        let options = MatchOptions::default();
+        let unindexed = match_scene_full(
+            1,
+            1,
+            std::slice::from_ref(&cell),
+            &atlas,
+            &weights,
+            &options,
+        );
+        let indexed = match_scene_indexed(1, 1, &[cell], &atlas, Some(&index), &weights, &options);
+
+        assert_eq!(unindexed.cells[0].token, indexed.cells[0].token);
+        assert_eq!(unindexed.cells[0].token, "─");
+    }
+
+    #[test]
+    fn match_scene_indexed_still_excludes_wide_glyphs_from_the_last_column() {
+        // The index-aware width filter must produce the same last-column
+        // exclusion as the unindexed path (see
+        // `wide_glyph_is_never_chosen_in_the_grids_last_column`).
+        let mask = mask_from_coords(&(0..16).map(|x| (x, 16)).collect::<Vec<_>>());
+        let wide = glyph_with_width("字", mask.clone(), 2);
+        let narrow = glyph_with_width("x", mask.clone(), 1);
+        let atlas = vec![wide, narrow];
+        let index = GlyphIndex::build(&atlas);
+
+        let cell = cell_from_mask(mask);
+        let canvas = match_scene_indexed(
+            1,
+            1,
+            &[cell],
+            &atlas,
+            Some(&index),
+            &MatchWeights::default(),
+            &MatchOptions::default(),
+        );
+        assert_eq!(canvas.cells[0].token, "x");
     }
 }

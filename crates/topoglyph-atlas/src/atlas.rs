@@ -3,6 +3,11 @@ use std::collections::HashMap;
 use topoglyph_core::features::extract_features;
 use topoglyph_core::geometry::{CellMask, PortMask};
 use topoglyph_core::matching::GlyphDescriptor;
+// `GlyphIndex` now lives in `topoglyph-core::matching` (so
+// `match_scene_indexed` can consume it without a dependency cycle); it's
+// re-exported here for source compatibility with existing callers that
+// wrote `topoglyph_atlas::atlas::GlyphIndex`.
+pub use topoglyph_core::matching::GlyphIndex;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -23,83 +28,6 @@ impl Default for AtlasOptions {
             normalize_position: true,
             include_whitespace: false,
         }
-    }
-}
-
-/// Secondary lookup structures over a [`GlyphAtlas`]'s `glyphs`, built once
-/// at atlas-construction time so callers with a large custom font atlas
-/// (hundreds/thousands of graphemes) can narrow the search space before
-/// falling back to a full per-glyph score. Each maps to indices into
-/// [`GlyphAtlas::glyphs`].
-pub struct GlyphIndex {
-    /// Glyphs grouped by their exact [`PortMask`]. Useful for the topology
-    /// term: given a required facing port, `by_ports` looks up every glyph
-    /// that exposes it in O(1) instead of scanning the whole atlas.
-    pub by_ports: HashMap<PortMask, Vec<usize>>,
-    /// Glyphs bucketed into 8 equal-width density bins
-    /// (`bin = floor(density times 8)`, clamped to `[0, 7]`),
-    /// coarsest-grained but cheapest lookup for narrowing candidates by
-    /// "how filled-in" a glyph is.
-    pub by_density: [Vec<usize>; 8],
-    /// Glyphs grouped by their `cell_width` (multi-column glyph support).
-    pub by_cell_width: HashMap<u8, Vec<usize>>,
-}
-
-impl GlyphIndex {
-    /// Builds all three lookup structures from a finished glyph list in a
-    /// single pass.
-    pub fn build(glyphs: &[GlyphDescriptor]) -> Self {
-        let mut by_ports: HashMap<PortMask, Vec<usize>> = HashMap::new();
-        let mut by_density: [Vec<usize>; 8] = Default::default();
-        let mut by_cell_width: HashMap<u8, Vec<usize>> = HashMap::new();
-
-        for (idx, glyph) in glyphs.iter().enumerate() {
-            by_ports.entry(glyph.ports).or_default().push(idx);
-
-            let bin = ((glyph.density * 8.0) as usize).min(7);
-            by_density[bin].push(idx);
-
-            by_cell_width.entry(glyph.cell_width).or_default().push(idx);
-        }
-
-        Self {
-            by_ports,
-            by_density,
-            by_cell_width,
-        }
-    }
-
-    /// Returns the indices of every glyph exposing at least the given
-    /// ports (an exact-match lookup would miss glyphs with *more* ports set
-    /// than requested, which are still valid candidates for a topology
-    /// term that only checks specific directions).
-    pub fn glyphs_with_any_port(&self, ports: PortMask) -> Vec<usize> {
-        if ports.is_empty() {
-            return (0..self.by_ports.values().map(Vec::len).sum()).collect();
-        }
-        let mut out = Vec::new();
-        for (&mask, indices) in &self.by_ports {
-            if mask.intersects(ports) {
-                out.extend_from_slice(indices);
-            }
-        }
-        out.sort_unstable();
-        out
-    }
-
-    /// Returns the indices of every glyph whose density bin is within
-    /// `tolerance_bins` of the given density's own bin. Widening
-    /// `tolerance_bins` trades index selectivity for recall.
-    pub fn glyphs_near_density(&self, density: f32, tolerance_bins: usize) -> Vec<usize> {
-        let center = ((density * 8.0) as usize).min(7);
-        let lo = center.saturating_sub(tolerance_bins);
-        let hi = (center + tolerance_bins).min(7);
-        let mut out = Vec::new();
-        for bin in &self.by_density[lo..=hi] {
-            out.extend_from_slice(bin);
-        }
-        out.sort_unstable();
-        out
     }
 }
 

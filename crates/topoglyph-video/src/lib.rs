@@ -91,11 +91,12 @@ pub fn render_frame(
     };
     let (out_cols, out_rows, cell_descriptors) = clipping::process_scene(&scene, &grid_opts);
 
-    let canvas = matching::match_scene_full(
+    let canvas = matching::match_scene_indexed(
         out_cols,
         out_rows,
         &cell_descriptors,
         &atlas.glyphs,
+        Some(&atlas.index),
         &options.weights,
         &options.match_options,
     );

@@ -320,11 +320,12 @@ fn run_render(args: RenderArgs) -> Result<Vec<u8>, String> {
         top_k: args.top_k,
         relaxation_rounds: args.relaxation_rounds,
     };
-    let canvas = matching::match_scene_full(
+    let canvas = matching::match_scene_indexed(
         out_cols,
         out_rows,
         &cell_descriptors,
         &atlas.glyphs,
+        Some(&atlas.index),
         &weights,
         &match_options,
     );
