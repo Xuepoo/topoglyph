@@ -1,25 +1,97 @@
 [package]
 name = "topoglyph"
-version = "0.1.0"
-edition = "2021"
-authors = ["Xuepoo"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
 description = "Topology-to-Glyph Text-Art Engine"
+license.workspace = true
+repository.workspace = true
 
 [workspace]
+resolver = "2"
 members = [
     "crates/*"
 ]
+# `members` uses a glob, but `default-members` doesn't support glob
+# patterns, so every crate is listed explicitly here. This is what makes
+# plain `cargo test`/`cargo clippy`/`cargo build` (no `--workspace`, no
+# `-p`) actually cover every crate instead of only the root `topoglyph`
+# facade package — which is exactly the gap that silently made CI's
+# `cargo test --verbose` step run zero tests (see .github/workflows/ci.yml)
+# even though `cargo test --workspace` reports 91 passing. Keep this in
+# sync whenever a new crate is added under `crates/`.
+default-members = [
+    ".",
+    "crates/topoglyph-core",
+    "crates/topoglyph-atlas",
+    "crates/topoglyph-output",
+    "crates/topoglyph-vectomancy",
+    "crates/topoglyph-video",
+    "crates/topoglyph-cli",
+]
 
 [dependencies]
-topoglyph-atlas = { path = "crates/topoglyph-atlas" }
-topoglyph-core = { path = "crates/topoglyph-core" }
-topoglyph-output = { path = "crates/topoglyph-output" }
-topoglyph-vectomancy = { path = "crates/topoglyph-vectomancy" }
+topoglyph-atlas = { workspace = true }
+topoglyph-core = { workspace = true }
+topoglyph-output = { workspace = true }
+topoglyph-vectomancy = { workspace = true }
+# Optional, native-only: pulls in ffmpeg via vectomancy-video. Kept behind a
+# feature so a `default-features = false` consumer (e.g. a future wasm
+# bridge crate) never drags ffmpeg into its dependency graph just by
+# depending on this facade.
+topoglyph-video = { workspace = true, optional = true }
+
+[features]
+default = ["video"]
+video = ["dep:topoglyph-video"]
+
+[workspace.package]
+# Single source of truth for the version every topoglyph-* crate publishes
+# under. Bumping a release only requires editing this one field (plus the
+# `version = "..."` in each `[workspace.dependencies]` entry below, since
+# Cargo doesn't support inheriting a *dependency's* pinned version from
+# `workspace.package.version` — only a crate's *own* `[package].version`).
+# This is the exact gap that let `vectomancy-video`/`vectomancy-text` drift
+# to a stale `7.0.0` while the rest of that workspace moved to `7.1.2`; see
+# `vectomancy/AGENTS.md`'s "Known Architecture Debt" section.
+version = "0.1.0"
+edition = "2021"
+authors = ["Xuepoo"]
+license = "MIT"
+repository = "https://github.com/Xuepoo/topoglyph"
 
 [workspace.dependencies]
-vectomancy-geometry = { path = "../vectomancy/crates/vectomancy-geometry", version = "7.1.2" }
-vectomancy-raster = { path = "../vectomancy/crates/vectomancy-raster", version = "7.1.2" }
-vectomancy-svg = { path = "../vectomancy/crates/vectomancy-svg", version = "7.1.2" }
+# Internal crates. Every one of these needs an explicit `version` (not just
+# `path`) because `cargo publish` refuses to publish a crate whose
+# dependency is a bare path with no version — crates.io has no path to
+# resolve against, only a version range. Keep this version in sync with
+# `workspace.package.version` above on every release.
+topoglyph = { path = ".", version = "0.1.0" }
+topoglyph-core = { path = "crates/topoglyph-core", version = "0.1.0" }
+topoglyph-atlas = { path = "crates/topoglyph-atlas", version = "0.1.0" }
+topoglyph-output = { path = "crates/topoglyph-output", version = "0.1.0" }
+topoglyph-vectomancy = { path = "crates/topoglyph-vectomancy", version = "0.1.0" }
+topoglyph-video = { path = "crates/topoglyph-video", version = "0.1.0" }
+
+# Pinned to the published crates.io releases (not `path = "../vectomancy/..."`).
+# Cargo treats a `path` entry as authoritative and never falls back to the
+# registry, so a path dependency here would only ever build on a machine
+# that happens to have a sibling `../vectomancy` checkout — which is true on
+# this workstation but not in Docker, CI, or any other contributor's clone.
+# That gap is exactly what broke the Docker build (`failed to read
+# ".../vectomancy/crates/vectomancy-geometry/Cargo.toml": No such file or
+# directory`) once the build context no longer included that sibling repo.
+# If you need to test against unreleased local `vectomancy` changes, use a
+# temporary (uncommitted) `[patch.crates-io]` block rather than reintroducing
+# a path dependency here.
+vectomancy-geometry = "7.1.2"
+vectomancy-raster = "7.1.2"
+vectomancy-svg = "7.1.2"
+# Native-only: ffmpeg-next can't target wasm32, so video support (topoglyph-video)
+# is intentionally kept out of the wasm-facing crate graph (topoglyph-core/
+# -atlas/-output/-vectomancy), matching how vectomancy-video is isolated from
+# vectomancy-web/wasm-engine.
+vectomancy-video = "7.0.0"
 
 smallvec = "1.11"
 serde = { version = "1.0", features = ["derive"] }

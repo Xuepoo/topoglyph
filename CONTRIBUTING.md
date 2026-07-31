@@ -1,17 +1,18 @@
-# Contributing to vectomancy
+# Contributing to TopoGlyph
 
 Thank you for your interest in contributing!
 
 ## Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install) (stable)
+- [FFmpeg development headers](https://ffmpeg.org/) (`libavcodec`, `libavformat`, `libavutil`, `libswscale`, `libswresample`, `libavdevice`, `libavfilter` — required to build `topoglyph-video`/the CLI's default `video` feature)
 - [pre-commit](https://pre-commit.com/) (optional)
 
 ## Development Setup
 
 ```bash
-git clone https://github.com/Xuepoo/vectomancy.git
-cd vectomancy
+git clone https://github.com/Xuepoo/topoglyph.git
+cd topoglyph
 cargo build
 cargo test
 ```
@@ -28,15 +29,15 @@ cargo test
 
 We use [Conventional Commits](https://www.conventionalcommits.org/):
 
-| Prefix     | Usage                    |
-|------------|--------------------------|
-| `feat:`    | New feature              |
-| `fix:`     | Bug fix                  |
-| `docs:`    | Documentation only       |
-| `refactor:`| Code change (no feat/fix)|
-| `test:`    | Tests                    |
-| `ci:`      | CI/CD changes            |
-| `deps:`    | Dependency updates       |
+| Prefix      | Usage                     |
+| ----------- | ------------------------- |
+| `feat:`     | New feature               |
+| `fix:`      | Bug fix                   |
+| `docs:`     | Documentation only        |
+| `refactor:` | Code change (no feat/fix) |
+| `test:`     | Tests                     |
+| `ci:`       | CI/CD changes             |
+| `deps:`     | Dependency updates        |
 
 ## Release Process
 

@@ -5,70 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [7.0.0] - 2026-07-24
-
-### Changed
-- **Raster Pipeline Performance Overhaul**: The `image`/`video` raster-to-skeleton pipeline (Sobel edge detection, Zhang-Suen thinning) was almost entirely single-threaded despite `--threads`/rayon being available — profiling showed these two stages alone accounted for 90%+ of per-frame processing time on multi-megapixel inputs, and multithreading had no measurable effect on total runtime regardless of `--threads`. Sobel gradients now use `imageproc`'s parallel filter primitives across all cores; Zhang-Suen thinning was rewritten against a flat row-major grid (replacing nested `Vec<Vec<bool>>`) with per-iteration candidate scanning parallelized across rows. On a 6000x3375 test image this cuts single-frame processing from ~1.4s to ~0.5s on a 24-core machine (and remains correct: identical skeleton path/point counts before and after on all test images).
-- **Video Frame-Level Parallelism**: The `video` subcommand previously processed frames strictly one at a time. Frames are now batched (up to `min(threads, 8)` concurrent) and processed via `std::thread::scope`, in addition to the raster pipeline's own internal parallelism. Combined with the raster pipeline rewrite, a 10s/301-frame 1920x1080 test clip (Fourier mode) went from 22.4s to 4.5s on a 24-core machine — a 4.98x improvement. `--threads 1` remains available for single-core-constrained environments, though the underlying parallel primitives carry some overhead at threads=1 (video: ~32s vs ~22s previously) — this is an intentional and expected multithreading-first tradeoff, not a regression to fix.
-- **GPU FFT Pipeline Caching**: `perform_fft_gpu`/`perform_fft_batch_gpu` previously recompiled both compute pipelines (bind group layout, pipeline layout, and two `ComputePipeline`s) on every single call. These are now built once in `GpuContext` and reused. This is a correctness/efficiency fix on its own merits, but benchmarking confirms it does **not** change the GPU-vs-CPU performance picture: for Vectomancy's typical path sizes and counts, the CPU FFT path remains 2-270x faster than GPU (the bottleneck is the unavoidable per-call `device.poll(Wait)` CPU↔GPU synchronization round-trip, not pipeline setup). `--gpu` remains available and unchanged in behavior; it is not recommended for typical image/video workloads and its GPU-vs-CPU tradeoffs are unchanged by this release.
-
-### Verification
-- All raster pipeline changes preserve identical output: skeleton path counts, point counts, and rendered geometry were confirmed unchanged on all benchmark images (verified via extracted-path-count logging and visual rendering comparison).
-- `cargo test --workspace` and `cargo clippy --workspace --all-targets` pass with no warnings.
-
-## [6.4.0] - 2026-07-24
+## [Unreleased]
 
 ### Added
-- **Video GPU/Threading Controls**: The `video` subcommand now exposes `--gpu`, `--gpu-power`, and `--threads` flags (plus matching `gpu`/`gpu_power`/`threads` keys under `[video]` in `config.toml`), mirroring the `image` subcommand. Previously these were silently ignored on `video`: the CPU thread pool was never explicitly initialized (relying on rayon's default) and there was no way to enable `wgpu` GPU acceleration for Fourier FFT batches when processing video frames.
 
-## [6.3.1] - 2026-07-24
+- **Video / `.tglyph` animation support**: New `topoglyph-video` crate (native-only, behind the `video` cargo feature) converts a video file to a `.tglyph` text animation via FFmpeg, treating a video as nothing more than a sequence of images run through the same still-image pipeline (parallelized per-frame with `rayon`). The `.tglyph` format itself (`topoglyph_output::animation::TglyphAnimation`) is a plain-text, frame-differential sequence: the first frame is written in full, and every subsequent frame records only the cells that changed. Color is off by default (`--color` opts in); the plain-text format compresses well with a generic tool like `gzip` on top, so no custom binary/base-N encoding was added.
+- **CLI `video`/`play` subcommands**: `topoglyph video <input> -o <output.tglyph> [options]` encodes a video; `topoglyph play <animation.tglyph> [--loop] [--no-color]` plays one back in the terminal using ANSI cursor-reset (`\x1b[H`) for flicker-free playback at the recorded frame rate.
+- **`--invert`**: Inverts sampled path colors (`#rrggbb` -> `#(255-r)(255-g)(255-b)`). Brightness inversion was intentionally not implemented on top of this: skeleton extraction runs on Sobel edge magnitude, which is invariant to a global brightness inversion of the source image, so glyph selection is unaffected either way.
+- **`--glyph-mode set|weighted`**: Custom character pools (`--charset custom --font ...`) now track each grapheme's relative frequency in `--custom-chars`. Under `weighted` mode, more frequent characters are preferred when shape/topology scores are otherwise close; `set` mode (the default) ignores frequency entirely.
+- **CJK / Emoji glyph support**: `topoglyph-atlas` now computes each custom-font grapheme's real terminal display width via `unicode-width`'s East Asian Width data, so CJK ideographs and most Emoji correctly report `cell_width = 2` instead of the previous hardcoded `1`. Verified against real fonts (Noto Sans SC, Segoe UI Emoji) and real image input.
+- **Top-K candidate pool + multi-round Neighbor Relaxation**: `match_scene_full` now builds a per-cell Top-K shape-ranked candidate pool, then refines it across several Neighbor Relaxation rounds (per `topoglyph-docs/technical.md` section 2.3), replacing the earlier single full-atlas rescan pass.
+- **`GlyphIndex` real indexing**: `by_ports`/`by_density`/`by_cell_width` are now actually built and queryable (`glyphs_with_any_port`, `glyphs_near_density`) instead of always being empty.
+- **6-factor glyph matching**: `MatchWeights`/`shape_score`/`topology_mismatch` now implement the full `Score = wm*mask_dist + wt*topology_dist + wo*orientation_dist + wd*density_dist + wc*centroid_dist + wk*curvature_dist` formula from `topoglyph-docs/technical.md` section 2.2, including `line_art_preset()`/`han_emoji_preset()`.
+- **Debug/HTML encoders**: Added `JsonDebugEncoder` (full per-cell match data including scores), `HtmlEncoder`, and `DebugSvgEncoder` alongside the existing Plain Text/ANSI encoders.
+- **Expanded built-in line atlas**: Grew from 9 to 17 glyphs (added T-junctions and half-length stroke stubs), fixing a pathology where any branching or partial-length stroke had no better match than a full 2-port line or the single 4-port cross.
+- **`topoglyph-cli render`/`atlas inspect` subcommand structure**: The CLI now has explicit `render`/`atlas` subcommands (plus `video`/`play` above), with argv pre-processing so `topoglyph <image.png> ...` still works without a subcommand.
+
+### Changed
+
+- **Skeleton extraction quality**: `vectomancy-raster::decode_raster_memory` (used by `topoglyph-vectomancy`'s raster adapter) now uses full Zhang-Suen thinning plus endpoint/loop-aware path tracing, replacing a simplified greedy walk that stopped at the first branch point and produced fragmented, noisy skeletons.
+- **RDP + Chaikin smoothing before grid clipping**: `topoglyph_vectomancy::adapter::smooth_scene` applies RDP simplification and Chaikin corner-cutting to extracted skeleton paths before they reach `topoglyph_core::clipping`, removing pixel-grid jitter that previously fragmented the subcell mask.
+- **Liang-Barsky exact segment clipping**: `topoglyph_core::clipping` replaced a Bresenham pixel-walk (which silently dropped any segment portion crossing outside the canvas) with exact Liang-Barsky line clipping against each cell's boundary.
 
 ### Fixed
-- **GIF Video Output**: `vectomancy video -o out.gif` previously accepted `.gif` as a valid output extension but always encoded frames with `libx264`, which the GIF muxer rejects (`gif muxer supports only codec gif for type video`), so every GIF export failed. Frames are now encoded with the native `gif` codec through a palette-optimized filter chain (`palettegen`/`paletteuse`).
-- **Audio Detection**: The video re-encoding pipeline previously treated any existing input file as having an audio track (`args.input.exists()`), which crashed on silent inputs with `Failed to set value '1:a' for option 'map'`. Audio presence is now probed via `ffmpeg`'s stream list (`vectomancy_video::has_audio_stream`), and GIF outputs never attempt to map audio (the format doesn't support it).
 
-## [6.3.0] - 2026-07-24
+- CLI error handling: all `unwrap()`/`expect()` calls in `topoglyph-cli` were replaced with `Result` propagation and readable error messages (previously e.g. `-C blocks` without `--font` would panic with a raw Rust backtrace).
+- Release/packaging metadata (`Cargo.toml` workspace inheritance, `[[bin]]` name, `Dockerfile`, `nfpm.yaml`, `release.yml`'s crates.io publish order) was copied wholesale from the `vectomancy` repository template and didn't match TopoGlyph's actual crate layout — `cargo build --bin topoglyph` would have failed outright (no such binary target existed; the crate produced `topoglyph-cli` instead). Fixed by adding an explicit `[[bin]] name = "topoglyph"`, introducing `[workspace.package]`/`workspace.dependencies` version inheritance so every internal path dependency carries the `version` crates.io requires, rewriting the `Dockerfile`'s `COPY`/build paths to match the real `crates/topoglyph-*` layout, and rewriting `release.yml`'s `publish-crates` job to follow the real dependency order (`core` -> `atlas`/`output`/`vectomancy` -> facade -> `video` -> `cli`).
+- `Cargo.toml`'s `[workspace]` had no `default-members`, so plain `cargo test`/`cargo clippy`/`cargo build` (as run by `.github/workflows/ci.yml`, with no `--workspace`/`-p`) only covered the root `topoglyph` facade package — which has no tests of its own — silently running zero tests in CI despite `cargo test --workspace` reporting dozens passing locally. Fixed by adding an explicit `default-members` list covering every crate.
+- Removed the repo-committed `.cargo/config.toml` (`rustflags = ["-C", "target-cpu=native", ...]`). This was originally added to work around a local wasm build issue, but the actual fix needed was a linker choice (`mold`), which belongs in a developer's own global Cargo config (`$CARGO_HOME/config.toml`), not the repository — `target-cpu=native` itself is not required for any `wasm32-unknown-unknown` build in this workspace (verified by building `topoglyph-core`/`-atlas`/`-output`/`-vectomancy` for that target with a clean `CARGO_HOME` and no repo-level Cargo config), and shipping it in the repo would have made `release.yml`'s cross-platform binaries potentially crash (`SIGILL`) on any user CPU lacking whatever instruction-set extensions the CI runner's CPU happens to support.
 
-### Added
-- **SVG Export Format**: New `--format svg` output for `image`, `video`, and `text` subcommands. Flattens Spline, Fourier, and Polyline/Chaikin AST curves into `<path>` elements in a standalone, viewBox-scoped SVG document. Solid colors and linear gradients are preserved via `<linearGradient>` defs.
-- **CLI**: Added `svg` variant to `--format`/`-f` and automatic `.svg` extension detection for the `text` subcommand's output path.
-
-## [6.2.0] - 2026-06-25
+## [0.1.0] - initial workspace scaffold
 
 ### Added
-- **Adaptive Fourier Compression**: Dynamically determines the minimal number of Fourier terms to retain based on a cumulative energy ratio (default 99.5%).
-- **CLI Flags**: Added `--fourier-adaptive` (boolean) and `--fourier-energy` (float) flags to Image and Video subcommands.
-- **Config Options**: Added `fourier_adaptive` and `fourier_energy_threshold` parameters to `config.toml` under `[image]`, `[video]`, and `[text]` sections.
 
-## [6.1.0] - 2026-06-24
-
-### Added
-- **AST Floating-Point Quantization**: Added mathematical coordinates and expression rounding (truncated to 4 decimal places by default) to optimize serialized files and rendering speed.
-- **Zero Term Elimination**: In Desmos export, terms multiplied by `0.0` (e.g., `0*(t-x)`) are now omitted to keep equations as brief as possible.
-- **Configuration Toggle**: Added `simplify_math` (boolean) configuration parameter under `[image]`, `[text]`, and `[video]` sections in `config.toml`.
-- **CLI Flag**: Added `--no-simplify-math` to `image`, `text`, and `video` CLI subcommands to bypass rounding and retain original precision.
-- **Web UI Control**: Added a "Simplify" checkbox to the Settings panel in Vectomancy Pro (Image, Playground, and Video pages), allowing users to control mathematical rounding and zero-term removal in the web browser.
-
-### Changed
-- **Default Behavior**: Spline coordinate representation is now rounded by default (saving ~40% file size and increasing browser rendering performance).
-- **Template Updates**: `desmos.tera` updated to dynamically filter out `0.0` coefficients.
-
-## [5.0.0] - 2026-06-10
-
-### Added
-- Grouped configuration under `image`, `video`, and `text` subcommands in `Config`.
-- Support for `image`, `video`, and `text` subcommands in `vectomancy-cli`.
-- `vectomancy-text` module for direct TTF/OTF font outline extraction.
-- Automatic RAII temporary directories in integration tests.
-
-### Fixed
-- Fixed cascading configuration overrides between command-line arguments and configuration settings.
-- Resolved redundant conditional compilation gates and warnings.
-
-## [4.1.0] - 2026-05-28
-### Added
-- Wasm-pack targets and memory-based parsers.
-
-## [4.0.0] - 2026-05-20
-### Changed
-- Replaced outdated formats (Scratch, Kmplot, Wolfram, Geogebra, Latex) with standard Spline, Fourier, and Chaikin representations.
+- Initial `topoglyph-core`/`topoglyph-atlas`/`topoglyph-output`/`topoglyph-vectomancy`/`topoglyph-cli` crate layout.
+- Built-in 9-glyph line-drawing atlas (full-length lines, rounded corners, cross).
+- Basic raster-to-text-art pipeline: raster decode -> subcell grid clipping (Bresenham) -> mask+port matching -> Plain Text/ANSI output.

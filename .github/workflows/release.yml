@@ -181,44 +181,43 @@ jobs:
           VERSION="${TAG_NAME#v}"
           echo "Extracted publish version: $VERSION"
 
-          # 1. Publish geometry
-          cargo publish --manifest-path crates/topoglyph-geometry/Cargo.toml --package topoglyph-geometry --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-geometry" "$VERSION"
+          # Publish order follows the real dependency graph under
+          # crates/topoglyph-* (see the workspace Cargo.toml's
+          # `[workspace.dependencies]` block): topoglyph-core has no
+          # internal dependencies, so it must go first; topoglyph-atlas/
+          # -output/-vectomancy each depend only on topoglyph-core;
+          # topoglyph-video depends on all four of those plus the facade;
+          # the root `topoglyph` facade re-exports the first four; and
+          # topoglyph-cli depends on the facade. `wait_for_crate` blocks
+          # until each publish is visible on crates.io before the next
+          # `cargo publish` tries to resolve it as a dependency.
 
-          # 2. Publish transform
-          cargo publish --manifest-path crates/topoglyph-transform/Cargo.toml --package topoglyph-transform --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-transform" "$VERSION"
+          # 1. Publish core (no internal deps)
+          cargo publish --manifest-path crates/topoglyph-core/Cargo.toml --package topoglyph-core --token ${{ secrets.CRATES_TOKEN }} --no-verify
+          wait_for_crate "topoglyph-core" "$VERSION"
 
-          # 3. Publish raster
-          cargo publish --manifest-path crates/topoglyph-raster/Cargo.toml --package topoglyph-raster --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-raster" "$VERSION"
+          # 2. Publish atlas (depends on core)
+          cargo publish --manifest-path crates/topoglyph-atlas/Cargo.toml --package topoglyph-atlas --token ${{ secrets.CRATES_TOKEN }} --no-verify
+          wait_for_crate "topoglyph-atlas" "$VERSION"
 
-          # 4. Publish svg
-          cargo publish --manifest-path crates/topoglyph-svg/Cargo.toml --package topoglyph-svg --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-svg" "$VERSION"
+          # 3. Publish output (depends on core)
+          cargo publish --manifest-path crates/topoglyph-output/Cargo.toml --package topoglyph-output --token ${{ secrets.CRATES_TOKEN }} --no-verify
+          wait_for_crate "topoglyph-output" "$VERSION"
 
-          # 5. Publish export
-          cargo publish --manifest-path crates/topoglyph-export/Cargo.toml --package topoglyph-export --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-export" "$VERSION"
+          # 4. Publish vectomancy bridge (depends on core)
+          cargo publish --manifest-path crates/topoglyph-vectomancy/Cargo.toml --package topoglyph-vectomancy --token ${{ secrets.CRATES_TOKEN }} --no-verify
+          wait_for_crate "topoglyph-vectomancy" "$VERSION"
 
-          # 6. Publish pipeline
-          cargo publish --manifest-path crates/topoglyph-pipeline/Cargo.toml --package topoglyph-pipeline --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-pipeline" "$VERSION"
-
-          # 7. Publish core
+          # 5. Publish the root facade (depends on core/atlas/output/vectomancy)
           cargo publish --manifest-path Cargo.toml --package topoglyph --token ${{ secrets.CRATES_TOKEN }} --no-verify
           wait_for_crate "topoglyph" "$VERSION"
 
-          # 8. Publish text
-          cargo publish --manifest-path text/Cargo.toml --package topoglyph-text --token ${{ secrets.CRATES_TOKEN }} --no-verify
-          wait_for_crate "topoglyph-text" "$VERSION"
-
-          # 9. Publish video
-          cargo publish --manifest-path video/Cargo.toml --package topoglyph-video --token ${{ secrets.CRATES_TOKEN }} --no-verify
+          # 6. Publish video (native-only, depends on core/atlas/output/vectomancy)
+          cargo publish --manifest-path crates/topoglyph-video/Cargo.toml --package topoglyph-video --token ${{ secrets.CRATES_TOKEN }} --no-verify
           wait_for_crate "topoglyph-video" "$VERSION"
 
-          # 10. Publish cli
-          cargo publish --manifest-path cli/Cargo.toml --package topoglyph-cli --token ${{ secrets.CRATES_TOKEN }} --no-verify
+          # 7. Publish cli (depends on the facade)
+          cargo publish --manifest-path crates/topoglyph-cli/Cargo.toml --package topoglyph-cli --token ${{ secrets.CRATES_TOKEN }} --no-verify
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
 
@@ -308,7 +307,7 @@ jobs:
           mkdir -p homebrew-tap/Formula
           cat << EOF > homebrew-tap/Formula/topoglyph.rb
           class Topoglyph < Formula
-            desc "Image to vector math CLI"
+            desc "Topology-to-glyph text-art rendering engine"
             homepage "https://github.com/Xuepoo/topoglyph"
             version "${CLEAN_VERSION}"
 
@@ -362,7 +361,7 @@ jobs:
           cat << EOF > scoop-bucket/bucket/topoglyph.json
           {
             "version": "${CLEAN_VERSION}",
-            "description": "Image to vector math CLI",
+            "description": "Topology-to-glyph text-art rendering engine",
             "homepage": "https://github.com/Xuepoo/topoglyph",
             "license": "MIT",
             "architecture": {

@@ -4,25 +4,40 @@
 
 **Topology + Glyph：将图像的几何拓扑量化成文字 Glyph。**
 
-TopoGlyph 是 Vectomancy 生态下的一款高性能数学引擎。它并非传统的“按像素亮度映射 ASCII”的转换器，而是一个基于几何拓扑映射的全新排版系统。它通过对矢量或光栅图像进行深度的子像素提取、将轮廓裁切（Clipping）为 16×32 的高分辨率 Bit Mask，然后与字体图集 (Glyph Atlas) 进行异或距离（XOR Distance）和端口连接（Port Hamming Distance）比对，找到结构上最匹配的字符，最终重建出带有 ANSI 真彩色的纯文本图像。
+TopoGlyph 是 Vectomancy 生态下的一款高性能数学引擎。它并非传统的“按像素亮度映射 ASCII”的转换器，而是一个基于几何拓扑映射的全新排版系统。它通过对矢量或光栅图像进行深度的子像素提取、将轮廓裁切（Clipping）为 16×32 的高分辨率 Bit Mask，然后与字体图集 (Glyph Atlas) 进行 6 因子评分（掩码/拓扑/方向/密度/质心/曲率）并经过多轮邻接松弛（Neighbor Relaxation）比对，找到结构上最匹配的字符，最终重建出带有 ANSI 真彩色的纯文本图像。
 
 ## 核心架构设计
 
 项目采用多 Crate Workspace 结构，划分为：
 
-- `topoglyph-core`: 定义底层的 16×32 `CellMask`，8 端口 `PortMask`，基于异或（XOR）距离的超高速匹配器，以及基于 DDA / Liang-Barsky 的子网格裁剪算法。
-- `topoglyph-atlas`: 管理字体字形库，将字形预光栅化为 Mask 以供搜索（0.1.0 MVP 版本目前内置了极简的 9 种 Unicode 线条，后续版本将支持真实字体）。
-- `topoglyph-vectomancy`: 适配层，桥接 `vectomancy-geometry` 和 `vectomancy-raster`，提供输入数据源，将 PNG/JPG 和矢量多边形解析为标准的 `PolylineScene`。
-- `topoglyph-output`: 渲染器，包含 ANSI Truecolor 文本输出等能力。
-- `topoglyph-cli`: 命令行入口。
+- `topoglyph-core`：定义底层的 16×32 `CellMask`，8 端口 `PortMask`，基于 Top-K 候选池 + 邻接松弛的字形匹配器，以及基于 Liang-Barsky 精确线段裁剪的子网格切割算法。
+- `topoglyph-atlas`：管理字形库。内置 17 种 Unicode 线条字形（全长线、圆角、T 字交叉、半长线段），同时支持真实 TrueType/OpenType 字体栅格化以构建自定义字符池——包括中日韩汉字与 Emoji，并通过东亚宽度数据正确标注双宽字符的 `cell_width` 元数据。
+- `topoglyph-vectomancy`：适配层，桥接 `vectomancy-geometry` 和 `vectomancy-raster`，提供输入数据源，将 PNG/JPG 光栅图像（Zhang-Suen 骨架提取）或模拟 JSON 场景解析为标准的 `PolylineScene`，网格切割前还会做 RDP 简化 + Chaikin 平滑处理。
+- `topoglyph-output`：渲染器，包含纯文本、ANSI 真彩色、HTML、Debug SVG、JSON Debug 编码器，以及 `.tglyph` 帧差分文本动画格式。
+- `topoglyph-video`（可选，仅原生环境；CLI 默认 `video` feature 已开启）：通过 FFmpeg 把视频文件转换为 `.tglyph` 文本动画，把视频当作纯粹的图片帧序列，逐帧走跟静态图片一样的处理管线。
+- `topoglyph-cli`：命令行入口，提供 `render`、`atlas inspect`、`video`、`play` 四个子命令。
 
 ## 如何运行
 
-可以使用 CLI 将一张图片转换为包含了 ANSI 终端转义序列的文本图像：
+构建 CLI（二进制名是 `topoglyph`，不是 `topoglyph-cli`）：
 
 ```bash
-cargo run -p topoglyph-cli -- /path/to/image.png > output.txt
+cargo build --release
+./target/release/topoglyph /path/to/image.png -W 120 -H 60 > output.txt
 ```
+
+或者不预先构建，直接运行：
+
+```bash
+cargo run --bin topoglyph -- /path/to/image.png -W 120 -H 60 > output.txt
+```
+
+### 子命令
+
+- `topoglyph render <image> [选项]`（不带子命令时的隐式默认行为，所以 `topoglyph <image>` 也能直接用）：把静态图片转换为文字画。关键选项：`-W/-H`（网格尺寸）、`-C/--charset lines|ascii|blocks|braille|custom`、`--font <路径>` + `--custom-chars "..."` 用于自定义字符池、`--glyph-mode set|weighted`、`--preset line-art|han-emoji`、`--output-format text|html|debug-svg|json`、`--invert`、`--tolerance`/`--chaikin-iters` 控制前置平滑、`--top-k`/`--relaxation-rounds` 控制匹配质量。
+- `topoglyph atlas inspect [选项]`：输出字库的字形数量、索引桶大小、每个字形的特征值 JSON 摘要，不渲染任何图片。
+- `topoglyph video <input.mp4> -o <output.tglyph> [选项]`：把视频文件转换为 `.tglyph` 文本动画。颜色默认关闭（`--color` 显式开启）——`.tglyph` 是纯文本的帧差分序列（第一帧全量，后续帧只记录变化的格子），因此在外层叠加 `gzip` 等通用压缩效果也不错。
+- `topoglyph play <animation.tglyph> [--loop] [--no-color]`：在终端里用 ANSI 光标复位（`\x1b[H`）无闪烁地按记录的帧率回放 `.tglyph` 动画。
 
 ### 🚨 为什么 VS Code 中看到的是乱码 `\x1b[38;2;...`？
 
@@ -42,5 +57,8 @@ TopoGlyph 默认输出的是带有 **ANSI 真彩色 (Truecolor)** 的终端转�
 3. **VS Code 安装插件查看文本**
    如果你希望直接在 VS Code 里点开 `.txt` 文件并看到颜色，你需要安装类似 **"ANSI Colors"** 这样的插件，安装后，VS Code 就能正确解析包含颜色序列的普通文件，并隐藏那些丑陋的转义代码。
 
+如果想直接用纯文本（不带颜色），给 `render`/`play` 加上 `--no-color`，或者把默认的 `-C lines` 换成 `-C ascii`/`-C blocks`/`-C braille`。
+
 ## 路线图 (Roadmap)
+
 查看上级目录 `topoglyph-docs/TODO.md` 获取最新的开发计划！

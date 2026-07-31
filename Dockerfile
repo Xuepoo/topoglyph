@@ -2,10 +2,10 @@
 FROM rust:slim-bookworm AS builder
 WORKDIR /usr/src/app
 
-# Install build dependencies for wgpu/Vulkan and FFmpeg
+# Install build dependencies for FFmpeg (topoglyph-video, native-only —
+# see topoglyph-docs/TODO.md 0.5.0 and the `video` cargo feature)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
-    libvulkan-dev \
     clang \
     libavcodec-dev \
     libavformat-dev \
@@ -16,30 +16,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavfilter-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency manifests and workspaces
+# Copy dependency manifests and the workspace (topoglyph is a single
+# `crates/*` workspace, unlike vectomancy's split cli/text/video top-level
+# dirs — everything lives under crates/topoglyph-*).
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-COPY cli ./cli
 COPY crates ./crates
-COPY text ./text
-COPY video ./video
-COPY benches ./benches
-COPY templates ./templates
 
-# Build the release binary for the CLI subcommand
+# Build the release binary for the CLI
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/src/app/target \
-    cargo build --release --bin vectomancy && \
-    cp ./target/release/vectomancy /tmp/vectomancy
+    cargo build --release --bin topoglyph && \
+    cp ./target/release/topoglyph /tmp/topoglyph
 
 # Runtime Stage
 FROM debian:bookworm-slim
 
-# Install runtime dependencies for wgpu (Vulkan) and FFmpeg libs
+# Install runtime dependencies for FFmpeg libs
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
-    libvulkan1 \
-    mesa-vulkan-drivers \
-    vulkan-tools \
     libavcodec-dev \
     libavformat-dev \
     libavutil-dev \
@@ -47,9 +41,9 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /tmp/vectomancy /usr/local/bin/vectomancy
+COPY --from=builder /tmp/topoglyph /usr/local/bin/topoglyph
 
 # Set default working directory for external data mounts
 WORKDIR /data
 
-ENTRYPOINT ["vectomancy"]
+ENTRYPOINT ["topoglyph"]

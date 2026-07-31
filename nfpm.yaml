@@ -1,11 +1,11 @@
 name: "topoglyph"
 arch: "amd64"
 platform: "linux"
-version: 4.0.2
+version: 0.1.0
 section: "default"
 priority: "optional"
 maintainer: "topoglyph developers"
-description: "Topoglyph - Image to vector math CLI"
+description: "TopoGlyph - Topology-to-Glyph text-art rendering engine"
 license: "MIT"
 contents:
   - src: ./topoglyph-linux-x86_64
