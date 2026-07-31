@@ -108,8 +108,6 @@ topoglyph play <animation.tglyph> [--loop] [--no-color]
 - `topoglyph-video`：通过 FFmpeg 把视频文件转换为 `.tglyph` 文本动画。
 - `topoglyph-cli`：命令行程序入口。
 
-查看上级目录的 `topoglyph-docs/TODO.md` 获取最新的开发计划与路线图。
-
 ## 许可证
 
 本项目采用 MIT 许可证。

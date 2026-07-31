@@ -108,8 +108,6 @@ The project utilizes a multi-crate Workspace structure, divided into:
 - `topoglyph-video`: Converts video files to `.tglyph` animations via FFmpeg.
 - `topoglyph-cli`: The command-line interface entry point.
 
-Check out `topoglyph-docs/TODO.md` in the parent directory for development roadmaps.
-
 ## License
 
 This project is licensed under the MIT License.
