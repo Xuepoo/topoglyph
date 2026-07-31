@@ -11,7 +11,7 @@ description = "Video/frame-sequence to TopoGlyph animation format (.tglyph) conv
 vectomancy-video = { workspace = true }
 image = { version = "0.25", features = ["webp"] }
 rayon = { workspace = true }
-thiserror = "1.0"
+thiserror = "2.0"
 topoglyph-core = { workspace = true }
 topoglyph-atlas = { workspace = true }
 topoglyph-vectomancy = { workspace = true }
