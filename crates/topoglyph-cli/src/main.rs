@@ -14,6 +14,18 @@ use topoglyph::output::encoder::{
 #[cfg(feature = "video")]
 use topoglyph::video::FrameRenderOptions;
 
+/// Resolves the requested output column count: `explicit` if given,
+/// otherwise the current terminal's column count (via `terminal_size`),
+/// falling back to `120` when stdout isn't a TTY (piped/redirected output,
+/// e.g. writing to a file or another process).
+fn resolve_width(explicit: Option<usize>) -> usize {
+    explicit.unwrap_or_else(|| {
+        terminal_size::terminal_size()
+            .map(|(terminal_size::Width(w), _)| w as usize)
+            .unwrap_or(120)
+    })
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -69,13 +81,17 @@ struct RenderArgs {
     /// Input file path (image)
     input: String,
 
-    /// Width of the output text grid
-    #[arg(short = 'W', long, default_value_t = 160)]
-    width: usize,
+    /// Width of the output text grid (omit to auto-fit the current
+    /// terminal's column count; falls back to 120 when stdout isn't a TTY,
+    /// e.g. piped to a file or another process).
+    #[arg(short = 'W', long)]
+    width: Option<usize>,
 
-    /// Height of the output text grid
-    #[arg(short = 'H', long, default_value_t = 80)]
-    height: usize,
+    /// Height of the output text grid (omit to auto-calculate from the
+    /// image's aspect ratio; recommended — a fixed height distorts any
+    /// image whose aspect ratio isn't exactly width:height).
+    #[arg(short = 'H', long)]
+    height: Option<usize>,
 
     /// Charset to use: 'lines', 'ascii', 'blocks', 'braille', 'custom'
     #[arg(short = 'C', long, default_value = "lines")]
@@ -158,9 +174,10 @@ struct VideoArgs {
     #[arg(short = 'o', long)]
     output: String,
 
-    /// Width of the output text grid.
-    #[arg(short = 'W', long, default_value_t = 120)]
-    width: usize,
+    /// Width of the output text grid (omit to auto-fit the current
+    /// terminal's column count; falls back to 120 when stdout isn't a TTY).
+    #[arg(short = 'W', long)]
+    width: Option<usize>,
 
     /// Height of the output text grid (omit to auto-calculate from the video
     /// frame's aspect ratio; recommended — avoids the 4:3→1:1 squish).
@@ -213,6 +230,13 @@ struct VideoArgs {
     /// file.
     #[arg(long, default_value_t = false)]
     color: bool,
+
+    /// Number of CPU threads to use for parallel per-frame conversion.
+    /// Defaults to all available cores (rayon's global pool default), which
+    /// can pin every core at 100% for the duration of the conversion. Set
+    /// this to leave headroom for other work while converting.
+    #[arg(short = 'j', long)]
+    threads: Option<usize>,
 }
 
 #[derive(ClapArgs, Debug, Clone)]
@@ -315,8 +339,8 @@ fn run_render(args: RenderArgs) -> Result<Vec<u8>, String> {
 
     // 3. Setup Subcell grid clipping (Liang-Barsky segment clipping)
     let grid_opts = GridOptions {
-        columns: args.width,
-        rows: Some(args.height),
+        columns: resolve_width(args.width),
+        rows: args.height,
         ..Default::default()
     };
     let (out_cols, out_rows, cell_descriptors) = clipping::process_scene(&scene, &grid_opts);
@@ -416,7 +440,7 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
     weights.frequency_bias = 0.0; // no --glyph-mode for video yet; set-mode default
 
     let options = FrameRenderOptions {
-        columns: args.width,
+        columns: resolve_width(args.width),
         rows: args.height,
         smoothing: SmoothingOptions {
             tolerance: args.tolerance,
@@ -557,16 +581,32 @@ fn main() -> ExitCode {
             }
         },
         #[cfg(feature = "video")]
-        Command::Video(args) => match run_video(args) {
-            Ok(message) => {
-                println!("{message}");
-                ExitCode::SUCCESS
+        Command::Video(args) => {
+            // Limit rayon's global pool before any parallel work runs (must
+            // happen exactly once, before the pool is first used implicitly
+            // by `par_iter`). Defaults to every available core when
+            // `--threads` is omitted, matching rayon's own default and
+            // preserving prior behavior for anyone not using the new flag.
+            if let Some(threads) = args.threads {
+                if let Err(e) = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build_global()
+                {
+                    eprintln!("error: failed to set thread count: {e}");
+                    return ExitCode::FAILURE;
+                }
             }
-            Err(e) => {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
+            match run_video(args) {
+                Ok(message) => {
+                    println!("{message}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
         other => {
             let result = match other {
                 Command::Render(args) => run_render(args),

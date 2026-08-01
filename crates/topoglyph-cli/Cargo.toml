@@ -15,6 +15,8 @@ path = "src/main.rs"
 clap = { version = "4.6.4", features = ["derive"] }
 topoglyph = { workspace = true }
 serde_json = "1.0.151"
+rayon = { workspace = true }
+terminal_size = "0.4.4"
 
 [features]
 default = ["video"]

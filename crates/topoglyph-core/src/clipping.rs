@@ -6,9 +6,27 @@ pub fn process_scene(
     scene: &PolylineScene,
     options: &GridOptions,
 ) -> (usize, usize, Vec<CellDescriptor>) {
-    let bounds = &scene.bounds;
-    let width = (bounds.max_x - bounds.min_x).max(1e-5);
-    let height = (bounds.max_y - bounds.min_y).max(1e-5);
+    // Use the frame's actual pixel dimensions (`scene.dimensions`) as the
+    // coordinate reference, not the extracted skeleton's content bounding
+    // box (`scene.bounds`). Two problems if `bounds` is used instead:
+    //
+    // 1. Aspect-ratio blowup: a skeleton that degenerates to a near-zero-
+    //    width/height bbox (e.g. a blank/near-blank video frame) divides by
+    //    a value clamped to `1e-5`, so `aspect` can explode to the tens of
+    //    millions and `columns * rows` tries to allocate terabytes (this is
+    //    exactly what crashed `topoglyph video` on some bad-apple.mp4
+    //    frames: "memory allocation of 37013760000000 bytes failed").
+    // 2. Per-frame zoom/pan jitter: `bounds` is however much of the frame
+    //    the skeleton happens to occupy, which varies frame to frame even
+    //    when the source video's dimensions never change. Scaling content
+    //    to fill the grid based on `bounds` means every frame gets its own
+    //    independent crop-and-zoom, so the rendered subject appears to
+    //    randomly grow/shrink/shift between frames ("有时扁有时宽有时矮").
+    //    Anchoring on `dimensions` keeps one fixed frame of reference for
+    //    the whole conversion, exactly like the source video/image.
+    let (dim_w, dim_h) = scene.dimensions;
+    let width = if dim_w > 0 { dim_w as f64 } else { 1.0 };
+    let height = if dim_h > 0 { dim_h as f64 } else { 1.0 };
 
     let columns = options.columns;
     let rows = options.rows.unwrap_or_else(|| {
@@ -51,10 +69,10 @@ pub fn process_scene(
             let p0 = pts[i];
             let p1 = pts[i + 1];
 
-            let x0 = (p0.x - bounds.min_x) * scale_x;
-            let y0 = (p0.y - bounds.min_y) * scale_y;
-            let x1 = (p1.x - bounds.min_x) * scale_x;
-            let y1 = (p1.y - bounds.min_y) * scale_y;
+            let x0 = p0.x * scale_x;
+            let y0 = p0.y * scale_y;
+            let x1 = p1.x * scale_x;
+            let y1 = p1.y * scale_y;
 
             clip_segment_into_cells(
                 x0,
@@ -73,10 +91,10 @@ pub fn process_scene(
         if path.geometry.closed && pts.len() > 2 {
             let p0 = pts[pts.len() - 1];
             let p1 = pts[0];
-            let x0 = (p0.x - bounds.min_x) * scale_x;
-            let y0 = (p0.y - bounds.min_y) * scale_y;
-            let x1 = (p1.x - bounds.min_x) * scale_x;
-            let y1 = (p1.y - bounds.min_y) * scale_y;
+            let x0 = p0.x * scale_x;
+            let y0 = p0.y * scale_y;
+            let x1 = p1.x * scale_x;
+            let y1 = p1.y * scale_y;
             clip_segment_into_cells(
                 x0,
                 y0,

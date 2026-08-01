@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-01
+
+### Fixed
+- **Fixed aspect-ratio distortion and a video-conversion OOM crash (root cause)**: `topoglyph_core::clipping::process_scene` computed the output grid's aspect ratio from `scene.bounds` — the extracted skeleton's *content* bounding box — instead of `scene.dimensions`, the source image/frame's actual pixel size. Two consequences:
+  1. **`topoglyph video` could crash with a multi-terabyte allocation** (`memory allocation of 37013760000000 bytes failed`) whenever a frame's skeleton degenerated to a near-zero-width/height bbox (e.g. a blank or near-blank frame): `bounds.max_x - bounds.min_x` clamped to `1e-5`, so dividing by it sent the computed aspect ratio — and therefore `columns * rows` — into the billions.
+  2. **Per-frame "zoom/pan" jitter** in both the web renderer and `topoglyph video`: since `bounds` is however much of the frame the skeleton happens to occupy, and that varies frame to frame even though the source video's pixel dimensions never change, auto-sizing from it made the subject appear to randomly grow/shrink/shift between frames instead of staying anchored to one fixed frame.
+
+  Fixed by anchoring both the aspect-ratio calculation and the coordinate-to-grid mapping on `scene.dimensions` (with a `(1, 1)` fallback only for the degenerate zero-dimension case), so the output grid always reflects the source image/frame's real proportions and stays fixed across every frame of a conversion.
+- **`topoglyph render`'s fixed default height (80) and `topoglyph video`'s fixed default height (60) forced every non-matching-aspect-ratio input into a distorted grid.** `--height`/`-H` is now optional on both subcommands (previously required an explicit override to avoid distortion); omitting it lets the engine auto-calculate the correct height from the input's aspect ratio, matching the auto-fit `--width` behavior below.
+- **`topoglyph render`/`topoglyph video`'s fixed default widths (160/120, inconsistent with each other) no longer adapt to the terminal.** `--width`/`-W` is now optional on both subcommands; omitting it auto-fits the current terminal's column count (via the new `terminal_size` dependency), falling back to `120` when stdout isn't a TTY (piped to a file or another process).
+
+### Added
+- **`topoglyph video --threads`/`-j <N>`**: Limits the number of CPU threads used for parallel per-frame conversion (backed by a scoped `rayon::ThreadPoolBuilder`, applied once before any conversion work runs). Previously conversion always used every available core via rayon's global default, which could pin the whole machine at 100% CPU for the duration of a conversion with no way to leave headroom for other work.
+
 ## [0.2.0] - 2026-07-31
 
 ### Added
