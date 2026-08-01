@@ -162,9 +162,10 @@ struct VideoArgs {
     #[arg(short = 'W', long, default_value_t = 120)]
     width: usize,
 
-    /// Height of the output text grid.
-    #[arg(short = 'H', long, default_value_t = 60)]
-    height: usize,
+    /// Height of the output text grid (omit to auto-calculate from the video
+    /// frame's aspect ratio; recommended — avoids the 4:3→1:1 squish).
+    #[arg(short = 'H', long)]
+    height: Option<usize>,
 
     /// Charset to use: 'lines', 'ascii', 'blocks', 'braille', 'custom'.
     #[arg(short = 'C', long, default_value = "lines")]

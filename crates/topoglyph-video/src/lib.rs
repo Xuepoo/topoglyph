@@ -42,7 +42,7 @@ pub enum VideoConvertError {
 #[derive(Debug, Clone)]
 pub struct FrameRenderOptions {
     pub columns: usize,
-    pub rows: usize,
+    pub rows: Option<usize>,
     pub smoothing: SmoothingOptions,
     pub weights: MatchWeights,
     pub match_options: MatchOptions,
@@ -53,7 +53,7 @@ impl Default for FrameRenderOptions {
     fn default() -> Self {
         Self {
             columns: 120,
-            rows: 60,
+            rows: None,
             smoothing: SmoothingOptions::default(),
             weights: MatchWeights::default(),
             match_options: MatchOptions::default(),
@@ -86,7 +86,7 @@ pub fn render_frame(
 
     let grid_opts = GridOptions {
         columns: options.columns,
-        rows: Some(options.rows),
+        rows: options.rows,
         ..Default::default()
     };
     let (out_cols, out_rows, cell_descriptors) = clipping::process_scene(&scene, &grid_opts);
@@ -189,7 +189,7 @@ mod tests {
         let image = solid_image(32, 32, [10, 10, 10]);
         let options = FrameRenderOptions {
             columns: 4,
-            rows: 4,
+            rows: Some(4),
             ..Default::default()
         };
         let canvas = render_frame(&image, &atlas, &options).unwrap();
@@ -204,7 +204,7 @@ mod tests {
         let image = line_image(64, 64);
         let options = FrameRenderOptions {
             columns: 8,
-            rows: 8,
+            rows: Some(8),
             ..Default::default()
         };
         let canvas = render_frame(&image, &atlas, &options).unwrap();
@@ -223,7 +223,7 @@ mod tests {
         let atlas = GlyphAtlas::from_text("", &AtlasOptions::default()).unwrap();
         let options = FrameRenderOptions {
             columns: 4,
-            rows: 4,
+            rows: Some(4),
             ..Default::default()
         };
         let images = vec![
@@ -246,7 +246,7 @@ mod tests {
         let atlas = GlyphAtlas::from_text("", &AtlasOptions::default()).unwrap();
         let options = FrameRenderOptions {
             columns: 4,
-            rows: 4,
+            rows: Some(4),
             ..Default::default()
         };
         let frame = line_image(32, 32);
