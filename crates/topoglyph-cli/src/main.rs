@@ -14,18 +14,6 @@ use topoglyph::output::encoder::{
 #[cfg(feature = "video")]
 use topoglyph::video::FrameRenderOptions;
 
-/// Resolves the requested output column count: `explicit` if given,
-/// otherwise the current terminal's column count (via `terminal_size`),
-/// falling back to `120` when stdout isn't a TTY (piped/redirected output,
-/// e.g. writing to a file or another process).
-fn resolve_width(explicit: Option<usize>) -> usize {
-    explicit.unwrap_or_else(|| {
-        terminal_size::terminal_size()
-            .map(|(terminal_size::Width(w), _)| w as usize)
-            .unwrap_or(120)
-    })
-}
-
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -76,15 +64,13 @@ struct RenderArgs {
     /// Input file path (image)
     input: String,
 
-    /// Width of the output text grid (omit to auto-fit the current
-    /// terminal's column count; falls back to 120 when stdout isn't a TTY,
-    /// e.g. piped to a file or another process).
+    /// Width of the output text grid. Omit both width and height to derive a
+    /// resolution-aware grid from the source, capped at 600×300 cells.
     #[arg(short = 'W', long)]
     width: Option<usize>,
 
-    /// Height of the output text grid (omit to auto-calculate from the
-    /// image's aspect ratio; recommended — a fixed height distorts any
-    /// image whose aspect ratio isn't exactly width:height).
+    /// Height of the output text grid. When exactly one grid dimension is
+    /// provided, the other is derived from the source and cell aspect ratios.
     #[arg(short = 'H', long)]
     height: Option<usize>,
 
@@ -330,7 +316,7 @@ fn run_render(args: RenderArgs) -> Result<Vec<u8>, String> {
 
     // 3. Setup Subcell grid clipping (Liang-Barsky segment clipping)
     let grid_opts = GridOptions {
-        columns: resolve_width(args.width),
+        columns: args.width,
         rows: args.height,
         ..Default::default()
     };
@@ -431,7 +417,7 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
     weights.frequency_bias = 0.0; // no --glyph-mode for video yet; set-mode default
 
     let options = FrameRenderOptions {
-        columns: resolve_width(args.width),
+        columns: args.width,
         rows: args.height,
         smoothing: SmoothingOptions {
             tolerance: args.tolerance,

@@ -28,11 +28,7 @@ pub fn process_scene(
     let width = if dim_w > 0 { dim_w as f64 } else { 1.0 };
     let height = if dim_h > 0 { dim_h as f64 } else { 1.0 };
 
-    let columns = options.columns;
-    let rows = options.rows.unwrap_or_else(|| {
-        let aspect = (height / width) as f32;
-        ((columns as f32 * aspect * options.cell_aspect_ratio).round() as usize).max(1)
-    });
+    let (columns, rows) = options.resolve_dimensions(scene.dimensions);
 
     let mut cells = vec![
         CellDescriptor {
@@ -425,7 +421,7 @@ mod tests {
     fn process_scene_produces_nonempty_mask_for_diagonal_line() {
         let scene = scene_with_segment(Point2D::new(0.0, 0.0), Point2D::new(10.0, 10.0), false);
         let opts = GridOptions {
-            columns: 4,
+            columns: Some(4),
             rows: Some(4),
             ..Default::default()
         };
@@ -447,7 +443,7 @@ mod tests {
         // canvas boundary instead of skipped pixel-by-pixel.
         let scene = scene_with_segment(Point2D::new(-5.0, 2.0), Point2D::new(2.0, 2.0), false);
         let opts = GridOptions {
-            columns: 4,
+            columns: Some(4),
             rows: Some(4),
             ..Default::default()
         };
@@ -470,7 +466,7 @@ mod tests {
             bounds: BoundingBox::new(0.0, 0.0, 1.0, 1.0),
         };
         let opts = GridOptions {
-            columns: 3,
+            columns: Some(3),
             rows: Some(3),
             ..Default::default()
         };
@@ -485,7 +481,7 @@ mod tests {
         // should register the West port.
         let scene = scene_with_segment(Point2D::new(0.0, 0.0), Point2D::new(0.0, 1.0), false);
         let opts = GridOptions {
-            columns: 1,
+            columns: Some(1),
             rows: Some(1),
             ..Default::default()
         };

@@ -56,27 +56,14 @@ pub enum VideoConvertError {
 /// Options controlling how each decoded video frame is turned into a
 /// [`TextCanvas`], mirroring the still-image CLI's render options
 /// (`topoglyph-cli render`'s `RenderArgs`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FrameRenderOptions {
-    pub columns: usize,
+    pub columns: Option<usize>,
     pub rows: Option<usize>,
     pub smoothing: SmoothingOptions,
     pub weights: MatchWeights,
     pub match_options: MatchOptions,
     pub sample_color: bool,
-}
-
-impl Default for FrameRenderOptions {
-    fn default() -> Self {
-        Self {
-            columns: 120,
-            rows: None,
-            smoothing: SmoothingOptions::default(),
-            weights: MatchWeights::default(),
-            match_options: MatchOptions::default(),
-            sample_color: false,
-        }
-    }
 }
 
 /// Renders one decoded frame (already an in-memory image, not yet a
@@ -379,7 +366,7 @@ mod tests {
         let atlas = GlyphAtlas::from_text("", &AtlasOptions::default()).unwrap();
         let image = solid_image(32, 32, [10, 10, 10]);
         let options = FrameRenderOptions {
-            columns: 4,
+            columns: Some(4),
             rows: Some(4),
             ..Default::default()
         };
@@ -394,7 +381,7 @@ mod tests {
         let atlas = GlyphAtlas::from_text("", &AtlasOptions::default()).unwrap();
         let image = line_image(64, 64);
         let options = FrameRenderOptions {
-            columns: 8,
+            columns: Some(8),
             rows: Some(8),
             ..Default::default()
         };
@@ -413,7 +400,7 @@ mod tests {
     fn convert_frames_produces_one_tglyph_frame_per_input_image() {
         let atlas = GlyphAtlas::from_text("", &AtlasOptions::default()).unwrap();
         let options = FrameRenderOptions {
-            columns: 4,
+            columns: Some(4),
             rows: Some(4),
             ..Default::default()
         };
@@ -436,7 +423,7 @@ mod tests {
         // the resulting text should round-trip.
         let atlas = GlyphAtlas::from_text("", &AtlasOptions::default()).unwrap();
         let options = FrameRenderOptions {
-            columns: 4,
+            columns: Some(4),
             rows: Some(4),
             ..Default::default()
         };

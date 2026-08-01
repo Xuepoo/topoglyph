@@ -51,7 +51,7 @@ topoglyph render <image> [OPTIONS]
 ```
 
 Key Options:
-- `-W, --width <WIDTH>` / `-H, --height <HEIGHT>`: Output grid dimensions.
+- `-W, --width <WIDTH>` / `-H, --height <HEIGHT>`: Output grid dimensions. Omit both to derive a resolution-aware grid from the source without upscaling, capped at 600 columns × 300 rows. Set one dimension to derive the other from the source and cell aspect ratios; set both for an exact fixed grid.
 - `-C, --charset <CHARSET>`: Output character set (`lines`, `ascii`, `blocks`, `braille`, `custom`).
 - `--font <PATH>` & `--custom-chars <STRING>`: Specify a custom TTF/OTF font and character pool for mapping.
 - `--glyph-mode <MODE>`: Select character mapping mode (`set` or `weighted`).
@@ -71,7 +71,7 @@ topoglyph atlas inspect [OPTIONS]
 
 ### 3. Video Subcommand
 
-Convert a video file to a `.tglyph` text animation. Colors are off by default (`--color` to opt in). The `.tglyph` format is a plain-text, frame-differential sequence that compresses extremely well with generic tools like `gzip`:
+Convert a video file to a `.tglyph` text animation. Colors are off by default (`--color` to opt in). Video frames use the same resolution-aware Auto grid as still images when `--width` and `--height` are omitted. The `.tglyph` format is a plain-text, frame-differential sequence that compresses extremely well with generic tools like `gzip`:
 
 ```bash
 topoglyph video <input.mp4> -o <output.tglyph> [OPTIONS]
