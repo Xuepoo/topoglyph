@@ -35,16 +35,11 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Render an image to text art (the default when no subcommand is given;
-    /// see [`main`]'s subcommand-inference shim).
+    /// Render an image to text art.
     Render(RenderArgs),
-    /// Inspect a glyph atlas: dump its glyph count, index bucket sizes, and
-    /// per-glyph features, without rendering any image. See
-    /// `topoglyph-docs/TODO.md` 0.4.0 ("CLI 添加 `atlas inspect` 子命令").
+    /// Inspect a glyph atlas and print its glyph features as JSON.
     Atlas(AtlasArgs),
-    /// Convert a video file to a `.tglyph` text animation (frame-differential
-    /// text art sequence, not an actual video file). See
-    /// `topoglyph-docs/TODO.md` 0.5.0.
+    /// Convert a video into a compact `.tglyph` text animation.
     #[cfg(feature = "video")]
     Video(VideoArgs),
     /// Play back a `.tglyph` text animation in the terminal.
@@ -137,15 +132,12 @@ struct RenderArgs {
     #[arg(short = 'c', long, default_value_t = 1)]
     chaikin_iters: usize,
 
-    /// Glyph match weighting preset: 'line-art' (favors topology/port
-    /// connectivity, good for box-drawing charsets) or 'han-emoji' (favors
-    /// density/mask shape, good for CJK/emoji charsets). See
-    /// topoglyph-docs/technical.md section 2.2.
+    /// Glyph match weighting preset: 'line-art' favors topology and port
+    /// connectivity; 'han-emoji' favors density and mask shape.
     #[arg(long, default_value = "line-art")]
     preset: String,
 
-    /// Size of each cell's shape-ranked Top-K candidate pool used during
-    /// Neighbor Relaxation. See topoglyph-docs/technical.md section 2.3.
+    /// Size of each cell's shape-ranked candidate pool.
     #[arg(long, default_value_t = 8)]
     top_k: usize,
 
@@ -153,13 +145,9 @@ struct RenderArgs {
     #[arg(long, default_value_t = 3)]
     relaxation_rounds: usize,
 
-    /// Glyph selection mode for the character pool: 'set' (every glyph is
-    /// equally likely; picked purely by shape/topology score) or 'weighted'
-    /// (glyphs that repeat more often in --custom-chars are preferred when
-    /// shape/topology scores are close). Only affects --charset custom with
-    /// a --font; the built-in 'lines'/'ascii'/'blocks'/'braille' charsets
-    /// have no meaningful repeat frequency to weight by. See
-    /// topoglyph-docs/requirements.md section 3.2.
+    /// Glyph selection mode for custom font pools: 'set' treats every glyph
+    /// equally; 'weighted' prefers characters repeated in --custom-chars
+    /// when shape scores are close.
     #[arg(long, default_value = "set")]
     glyph_mode: String,
 }
@@ -196,12 +184,11 @@ struct VideoArgs {
     #[arg(long)]
     font: Option<String>,
 
-    /// RDP simplification tolerance, per-frame (see `RenderArgs::tolerance`).
+    /// RDP simplification tolerance applied to each frame.
     #[arg(long, default_value_t = 0.5)]
     tolerance: f64,
 
-    /// Chaikin smoothing iterations, per-frame (see
-    /// `RenderArgs::chaikin_iters`).
+    /// Chaikin smoothing iterations applied to each frame.
     #[arg(short = 'c', long, default_value_t = 1)]
     chaikin_iters: usize,
 
@@ -209,11 +196,11 @@ struct VideoArgs {
     #[arg(long, default_value = "line-art")]
     preset: String,
 
-    /// Top-K candidate pool size (see `RenderArgs::top_k`).
+    /// Number of glyph candidates retained for matching each cell.
     #[arg(long, default_value_t = 8)]
     top_k: usize,
 
-    /// Neighbor Relaxation rounds (see `RenderArgs::relaxation_rounds`).
+    /// Number of neighbor-relaxation passes.
     #[arg(long, default_value_t = 3)]
     relaxation_rounds: usize,
 
@@ -224,25 +211,16 @@ struct VideoArgs {
     #[arg(long, default_value_t = 24.0)]
     fps: f32,
 
-    /// Sample and record path colors in the animation. Off by default —
-    /// per `topoglyph-docs/TODO.md`, color is opt-in since most `.tglyph`
-    /// use cases (terminal ASCII-art playback) want the smaller, colorless
-    /// file.
+    /// Sample and record path colors. Disabled by default for smaller output.
     #[arg(long, default_value_t = false)]
     color: bool,
 
-    /// Number of CPU threads to use for parallel per-frame conversion.
-    /// Defaults to all available cores (rayon's global pool default), which
-    /// can pin every core at 100% for the duration of the conversion. Set
-    /// this to leave headroom for other work while converting.
+    /// Number of parallel frame-rendering workers. Defaults to all
+    /// available CPU threads.
     #[arg(short = 'j', long)]
-    threads: Option<usize>,
+    threads: Option<std::num::NonZeroUsize>,
 
-    /// Write the original human-readable text `.tglyph` v1 format instead
-    /// of the default compact binary v2 format (0.2.2). The text format is
-    /// larger (delta lines spend most of their bytes on decimal row/col
-    /// coordinates) but can be inspected with `cat`/a text editor; use
-    /// this if you need that over the ~4x smaller binary output.
+    /// Write human-readable text instead of compact binary output.
     #[arg(long, default_value_t = false)]
     text_format: bool,
 }
@@ -467,48 +445,64 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
         sample_color: args.color,
     };
 
-    let animation = topoglyph::video::convert_video_file(
+    let threads = args.threads.map_or_else(
+        || std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
+        std::num::NonZero::get,
+    );
+    let format = if args.text_format {
+        topoglyph::output::stream::AnimationFormat::Text
+    } else {
+        topoglyph::output::stream::AnimationFormat::Binary
+    };
+    let output_file = std::fs::File::create(&args.output)
+        .map_err(|e| format!("Failed to create '{}': {e}", args.output))?;
+    let conversion = topoglyph::video::convert_video_file_to_writer(
         std::path::Path::new(&args.input),
         &atlas,
         &options,
-        args.fps,
-        args.color,
-    )
-    .map_err(|e| format!("Failed to convert video: {e}"))?;
-
-    let (bytes, byte_len) = if args.text_format {
-        let text = animation.to_text();
-        let len = text.len();
-        (text.into_bytes(), len)
-    } else {
-        let bytes = animation.to_bytes();
-        let len = bytes.len();
-        (bytes, len)
+        topoglyph::video::VideoOutputOptions {
+            fps: args.fps,
+            include_color: args.color,
+            threads,
+            format,
+        },
+        output_file,
+    );
+    let (summary, output_file) = match conversion {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = std::fs::remove_file(&args.output);
+            return Err(format!("Failed to convert video: {error}"));
+        }
     };
-    std::fs::write(&args.output, &bytes)
-        .map_err(|e| format!("Failed to write '{}': {e}", args.output))?;
+    drop(output_file);
+    let byte_len = std::fs::metadata(&args.output)
+        .map_err(|e| format!("Failed to inspect '{}': {e}", args.output))?
+        .len();
 
-    // Extract the source video's audio track (if any) into a sidecar
-    // `<output>.wav` next to the `.tglyph` file, so `topoglyph play` has
-    // something to play back in sync with the frames (0.2.2: 视频转换的
-    // 时候应该带有音频). Silent inputs (GIFs, muted recordings) simply
-    // produce no sidecar rather than an error.
     let output_path = std::path::Path::new(&args.output);
-    let wav_path = topoglyph::video::audio::sidecar_wav_path(output_path);
-    let wrote_audio =
-        topoglyph::video::audio::extract_audio_to_wav(std::path::Path::new(&args.input), &wav_path)
-            .map_err(|e| format!("Failed to extract audio: {e}"))?;
+    let audio_path = topoglyph::video::audio::sidecar_audio_path(output_path);
+    let legacy_wav_path = topoglyph::video::audio::sidecar_wav_path(output_path);
+    let _ = std::fs::remove_file(&audio_path);
+    let _ = std::fs::remove_file(&legacy_wav_path);
+    let audio_mode = topoglyph::video::audio::extract_audio_to_m4a(
+        std::path::Path::new(&args.input),
+        &audio_path,
+    )
+    .map_err(|e| format!("Failed to extract audio: {e}"))?;
+    let audio_message = match audio_mode {
+        topoglyph::video::audio::AudioExtractMode::NoAudio => String::new(),
+        topoglyph::video::audio::AudioExtractMode::Remuxed => {
+            format!(", audio remuxed to {}", audio_path.display())
+        }
+        topoglyph::video::audio::AudioExtractMode::Transcoded => {
+            format!(", audio encoded to {}", audio_path.display())
+        }
+    };
 
     Ok(format!(
-        "Wrote {} frames ({} bytes) to {}{}",
-        animation.frames.len(),
-        byte_len,
-        args.output,
-        if wrote_audio {
-            format!(", audio to {}", wav_path.display())
-        } else {
-            String::new()
-        }
+        "Wrote {} frames ({} bytes, {}x{}) to {}{}",
+        summary.frame_count, byte_len, summary.width, summary.height, args.output, audio_message
     ))
 }
 
@@ -552,35 +546,42 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
     let left_pad = " ".repeat(term_cols.saturating_sub(animation.width) / 2);
     let top_pad = "\n".repeat(term_rows.saturating_sub(animation.height) / 2);
 
-    // If `topoglyph video` wrote a sidecar `<input>.wav` alongside this
-    // `.tglyph` file, load and play it through the default output device
-    // for the duration of playback. Missing sidecar or no audio device
-    // available are both silently treated as "play video only" rather
-    // than hard errors, since audio is an enhancement, not the point of
-    // `play`.
-    let wav_path = topoglyph::video::audio::sidecar_wav_path(std::path::Path::new(&args.input));
-    let _audio_sink = if !args.no_audio && wav_path.is_file() {
-        match std::fs::File::open(&wav_path)
-            .map_err(|e| e.to_string())
-            .and_then(|f| {
-                rodio::Decoder::new_wav(std::io::BufReader::new(f)).map_err(|e| e.to_string())
-            })
-            .and_then(|source| {
-                rodio::DeviceSinkBuilder::open_default_sink()
-                    .map_err(|e| e.to_string())
-                    .map(|sink| (sink, source))
-            }) {
-            Ok((sink, source)) => {
-                sink.mixer().add(source);
-                Some(sink)
+    // Prefer the compact M4A sidecar written by current versions, while
+    // retaining read-only support for legacy `.tglyph.wav` pairs.
+    let input_path = std::path::Path::new(&args.input);
+    let m4a_path = topoglyph::video::audio::sidecar_audio_path(input_path);
+    let wav_path = topoglyph::video::audio::sidecar_wav_path(input_path);
+    let audio_path = if m4a_path.is_file() {
+        Some(m4a_path)
+    } else if wav_path.is_file() {
+        Some(wav_path)
+    } else {
+        None
+    };
+    let _audio_sink = if !args.no_audio {
+        if let Some(audio_path) = audio_path {
+            match std::fs::File::open(&audio_path)
+                .map_err(|e| e.to_string())
+                .and_then(|file| rodio::Decoder::try_from(file).map_err(|e| e.to_string()))
+                .and_then(|source| {
+                    rodio::DeviceSinkBuilder::open_default_sink()
+                        .map_err(|e| e.to_string())
+                        .map(|sink| (sink, source))
+                }) {
+                Ok((sink, source)) => {
+                    sink.mixer().add(source);
+                    Some(sink)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "warning: failed to play audio sidecar '{}': {e}",
+                        audio_path.display()
+                    );
+                    None
+                }
             }
-            Err(e) => {
-                eprintln!(
-                    "warning: failed to play audio sidecar '{}': {e}",
-                    wav_path.display()
-                );
-                None
-            }
+        } else {
+            None
         }
     } else {
         None
@@ -679,32 +680,16 @@ fn main() -> ExitCode {
             }
         },
         #[cfg(feature = "video")]
-        Command::Video(args) => {
-            // Limit rayon's global pool before any parallel work runs (must
-            // happen exactly once, before the pool is first used implicitly
-            // by `par_iter`). Defaults to every available core when
-            // `--threads` is omitted, matching rayon's own default and
-            // preserving prior behavior for anyone not using the new flag.
-            if let Some(threads) = args.threads {
-                if let Err(e) = rayon::ThreadPoolBuilder::new()
-                    .num_threads(threads)
-                    .build_global()
-                {
-                    eprintln!("error: failed to set thread count: {e}");
-                    return ExitCode::FAILURE;
-                }
+        Command::Video(args) => match run_video(args) {
+            Ok(message) => {
+                println!("{message}");
+                ExitCode::SUCCESS
             }
-            match run_video(args) {
-                Ok(message) => {
-                    println!("{message}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    ExitCode::FAILURE
-                }
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
             }
-        }
+        },
         other => {
             let result = match other {
                 Command::Render(args) => run_render(args),
@@ -731,5 +716,43 @@ fn main() -> ExitCode {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn all_help_contains_only_public_user_facing_language() {
+        fn collect_help(mut command: clap::Command, help: &mut String) {
+            help.push_str(&command.render_long_help().to_string());
+            for subcommand in command.get_subcommands().cloned().collect::<Vec<_>>() {
+                collect_help(subcommand, help);
+            }
+        }
+
+        let mut help = String::new();
+        collect_help(Cli::command(), &mut help);
+
+        assert!(!help.contains("topoglyph-docs"));
+        assert!(!help.contains("TODO.md"));
+        assert!(!help.contains("RenderArgs::"));
+    }
+
+    #[test]
+    fn video_threads_must_be_positive() {
+        let parsed = Cli::try_parse_from([
+            "topoglyph",
+            "video",
+            "input.mp4",
+            "--output",
+            "output.tglyph",
+            "--threads",
+            "0",
+        ]);
+
+        assert!(parsed.is_err());
     }
 }

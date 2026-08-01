@@ -12,6 +12,10 @@
 //! is handed to [`topoglyph_output::animation::TglyphAnimation`] for
 //! delta-encoding into the final `.tglyph` text document.
 
+use std::collections::BTreeMap;
+use std::io::{Seek, Write};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
+
 use image::DynamicImage;
 use rayon::prelude::*;
 use topoglyph_atlas::atlas::GlyphAtlas;
@@ -20,6 +24,7 @@ use topoglyph_core::geometry::GridOptions;
 use topoglyph_core::matching::{MatchOptions, MatchWeights};
 use topoglyph_core::{clipping, matching};
 use topoglyph_output::animation::{TglyphAnimation, TglyphError};
+use topoglyph_output::stream::{AnimationFormat, StreamError, StreamingEncoder};
 
 pub mod audio;
 use topoglyph_vectomancy::adapter::{self, SmoothingOptions};
@@ -36,6 +41,16 @@ pub enum VideoConvertError {
     NoFrames,
     #[error(transparent)]
     Animation(#[from] TglyphError),
+    #[error("thread count must be at least 1")]
+    InvalidThreadCount,
+    #[error("failed to build render thread pool: {0}")]
+    ThreadPool(#[from] rayon::ThreadPoolBuildError),
+    #[error("video render pipeline disconnected")]
+    PipelineDisconnected,
+    #[error("video render worker panicked")]
+    WorkerPanic,
+    #[error(transparent)]
+    Stream(#[from] StreamError),
 }
 
 /// Options controlling how each decoded video frame is turned into a
@@ -165,6 +180,180 @@ pub fn convert_video_file(
         .map_err(|e| VideoConvertError::Decode(e.to_string()))?;
 
     convert_frames(&images, atlas, options, fps, include_color)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoConvertSummary {
+    pub frame_count: usize,
+    pub width: usize,
+    pub height: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VideoOutputOptions {
+    pub fps: f32,
+    pub include_color: bool,
+    pub threads: usize,
+    pub format: AnimationFormat,
+}
+
+struct InFlightLimiter {
+    available: Mutex<usize>,
+    ready: Condvar,
+}
+
+impl InFlightLimiter {
+    fn new(limit: usize) -> Arc<Self> {
+        Arc::new(Self {
+            available: Mutex::new(limit),
+            ready: Condvar::new(),
+        })
+    }
+
+    fn acquire(self: &Arc<Self>) -> InFlightPermit {
+        let mut available = self
+            .available
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *available == 0 {
+            available = self
+                .ready
+                .wait(available)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        *available -= 1;
+        InFlightPermit {
+            limiter: Arc::clone(self),
+        }
+    }
+}
+
+struct InFlightPermit {
+    limiter: Arc<InFlightLimiter>,
+}
+
+impl Drop for InFlightPermit {
+    fn drop(&mut self) {
+        let mut available = self
+            .limiter
+            .available
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *available += 1;
+        self.limiter.ready.notify_one();
+    }
+}
+
+/// Converts a video directly into a seekable `.tglyph` writer without ever
+/// materializing the whole video or animation in memory.
+///
+/// The decoder channel is bounded by `vectomancy-video`; this function adds a
+/// second bound around rendered canvases. At most `threads` completed frames
+/// can wait for an earlier frame before backpressure stops more rendering.
+/// Ordered frames are written immediately and only the previous canvas is
+/// retained for delta encoding.
+pub fn convert_video_file_to_writer<W: Write + Seek>(
+    path: &std::path::Path,
+    atlas: &GlyphAtlas,
+    render_options: &FrameRenderOptions,
+    output_options: VideoOutputOptions,
+    writer: W,
+) -> Result<(VideoConvertSummary, W), VideoConvertError> {
+    let VideoOutputOptions {
+        fps,
+        include_color,
+        threads,
+        format,
+    } = output_options;
+    if threads == 0 {
+        return Err(VideoConvertError::InvalidThreadCount);
+    }
+
+    let (receiver, decoder_handle) = vectomancy_video::decode_video_to_channel(path)
+        .map_err(|error| VideoConvertError::Decode(error.to_string()))?;
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()?;
+    let limiter = InFlightLimiter::new(threads);
+    let dictionary = atlas
+        .glyphs
+        .iter()
+        .map(|glyph| glyph.token.clone())
+        .collect::<Vec<_>>();
+
+    let conversion_result = std::thread::scope(|scope| {
+        let (result_sender, result_receiver) = mpsc::channel();
+        let producer_limiter = Arc::clone(&limiter);
+        let producer = scope.spawn(move || {
+            pool.install(|| {
+                receiver
+                    .iter()
+                    .enumerate()
+                    .par_bridge()
+                    .try_for_each(|(index, frame)| {
+                        let permit = producer_limiter.acquire();
+                        let result = frame
+                            .to_image()
+                            .map_err(|error| VideoConvertError::FrameConvert(error.to_string()))
+                            .and_then(|image| render_frame(&image, atlas, render_options));
+                        result_sender
+                            .send((index, result, permit))
+                            .map_err(|_| VideoConvertError::PipelineDisconnected)
+                    })
+            })
+        });
+
+        let mut pending = BTreeMap::new();
+        let mut next_index = 0_usize;
+        let mut writer = Some(writer);
+        let mut encoder: Option<StreamingEncoder<W>> = None;
+        let mut dimensions = None;
+
+        for (index, result, permit) in result_receiver {
+            pending.insert(index, (result, permit));
+            while let Some((result, permit)) = pending.remove(&next_index) {
+                let canvas = result?;
+                if encoder.is_none() {
+                    dimensions = Some((canvas.width, canvas.height));
+                    encoder = Some(StreamingEncoder::new(
+                        writer.take().expect("writer is consumed once"),
+                        fps,
+                        include_color,
+                        format,
+                        dictionary.clone(),
+                    )?);
+                }
+                encoder
+                    .as_mut()
+                    .expect("encoder initialized by first frame")
+                    .push_frame(canvas)?;
+                drop(permit);
+                next_index += 1;
+            }
+        }
+
+        producer
+            .join()
+            .map_err(|_| VideoConvertError::WorkerPanic)??;
+
+        let (width, height) = dimensions.ok_or(VideoConvertError::NoFrames)?;
+        let writer = encoder.ok_or(VideoConvertError::NoFrames)?.finish()?;
+        Ok((
+            VideoConvertSummary {
+                frame_count: next_index,
+                width,
+                height,
+            },
+            writer,
+        ))
+    });
+
+    let decoder_result = decoder_handle
+        .join()
+        .map_err(|_| VideoConvertError::Decode("decoder thread panicked".to_string()))?;
+    decoder_result.map_err(|error| VideoConvertError::Decode(error.to_string()))?;
+
+    conversion_result
 }
 
 #[cfg(test)]
