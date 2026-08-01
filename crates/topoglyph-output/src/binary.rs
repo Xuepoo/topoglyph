@@ -142,6 +142,22 @@ fn read_bytes<'a>(bytes: &'a [u8], pos: &mut usize, len: usize) -> Result<&'a [u
     Ok(slice)
 }
 
+fn read_cell_color(
+    bytes: &[u8],
+    include_color: bool,
+    pos: &mut usize,
+) -> Result<Option<String>, TglyphError> {
+    if !include_color {
+        return Ok(None);
+    }
+    let has_color = read_u8(bytes, pos)?;
+    if has_color == 0 {
+        return Ok(None);
+    }
+    let rgb = read_bytes(bytes, pos, 3)?;
+    Ok(Some(format_hex_color([rgb[0], rgb[1], rgb[2]])))
+}
+
 fn parse_hex_color(hex: &str) -> Option<[u8; 3]> {
     let hex = hex.trim_start_matches('#');
     if hex.len() < 6 {
@@ -244,66 +260,111 @@ pub fn encode(anim: &TglyphAnimation) -> Vec<u8> {
     out
 }
 
-/// Decodes a v2 binary buffer back into a [`TglyphAnimation`]. Callers
-/// should check [`is_binary`] first (or go through
-/// `TglyphAnimation::decode`, which does this automatically).
-pub fn decode(bytes: &[u8]) -> Result<TglyphAnimation, TglyphError> {
-    let mut pos = 0usize;
+/// Streams frames out of a v2 binary `.tglyph` buffer one at a time instead
+/// of materializing every decoded [`TextCanvas`] up front. Only the header,
+/// token dictionary, and the single most-recently-decoded frame (needed to
+/// apply the next delta) are kept in memory regardless of `frame_count` —
+/// this is what lets `topoglyph play` play back arbitrarily long animations
+/// without their full decoded size ever fitting in RAM at once.
+///
+/// Construct via [`BinaryFrameReader::new`], read `width`/`height`/`fps`/
+/// `frame_count`/`include_color` up front, then drive it as an [`Iterator`].
+pub struct BinaryFrameReader<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+    width: usize,
+    height: usize,
+    fps: f32,
+    include_color: bool,
+    frame_count: usize,
+    dict: Vec<String>,
+    next_index: usize,
+    previous: Option<TextCanvas>,
+}
 
-    if !bytes.starts_with(MAGIC) {
-        return Err(TglyphError::MalformedHeader(
-            "magic",
-            "TGLYPHB2",
-            String::from_utf8_lossy(bytes.get(..8).unwrap_or(bytes)).to_string(),
-        ));
-    }
-    pos += MAGIC.len();
+impl<'a> BinaryFrameReader<'a> {
+    /// Parses the header and token dictionary only; no frame data is
+    /// decoded until [`Iterator::next`] is first called.
+    pub fn new(bytes: &'a [u8]) -> Result<Self, TglyphError> {
+        let mut pos = 0usize;
 
-    let width = read_u32(bytes, &mut pos)? as usize;
-    let height = read_u32(bytes, &mut pos)? as usize;
-    let fps = read_f32(bytes, &mut pos)?;
-    let flags = read_u8(bytes, &mut pos)?;
-    let include_color = flags & FLAG_COLOR != 0;
-    let frame_count = read_u32(bytes, &mut pos)? as usize;
-
-    let dict_len = read_varint(bytes, &mut pos)? as usize;
-    let mut dict: Vec<String> = Vec::with_capacity(dict_len);
-    for _ in 0..dict_len {
-        let token_len = read_varint(bytes, &mut pos)? as usize;
-        let token_bytes = read_bytes(bytes, &mut pos, token_len)?;
-        let token = std::str::from_utf8(token_bytes)
-            .map_err(|_| TglyphError::MalformedBinary("dictionary entry is not valid UTF-8"))?
-            .to_string();
-        dict.push(token);
-    }
-
-    let cell_count = width * height;
-    let mut frames: Vec<TextCanvas> = Vec::with_capacity(frame_count);
-
-    let read_cell_color = |bytes: &[u8], pos: &mut usize| -> Result<Option<String>, TglyphError> {
-        if !include_color {
-            return Ok(None);
+        if !bytes.starts_with(MAGIC) {
+            return Err(TglyphError::MalformedHeader(
+                "magic",
+                "TGLYPHB2",
+                String::from_utf8_lossy(bytes.get(..8).unwrap_or(bytes)).to_string(),
+            ));
         }
-        let has_color = read_u8(bytes, pos)?;
-        if has_color == 0 {
-            return Ok(None);
-        }
-        let rgb = read_bytes(bytes, pos, 3)?;
-        Ok(Some(format_hex_color([rgb[0], rgb[1], rgb[2]])))
-    };
+        pos += MAGIC.len();
 
-    for i in 0..frame_count {
+        let width = read_u32(bytes, &mut pos)? as usize;
+        let height = read_u32(bytes, &mut pos)? as usize;
+        let fps = read_f32(bytes, &mut pos)?;
+        let flags = read_u8(bytes, &mut pos)?;
+        let include_color = flags & FLAG_COLOR != 0;
+        let frame_count = read_u32(bytes, &mut pos)? as usize;
+
+        let dict_len = read_varint(bytes, &mut pos)? as usize;
+        let mut dict: Vec<String> = Vec::with_capacity(dict_len);
+        for _ in 0..dict_len {
+            let token_len = read_varint(bytes, &mut pos)? as usize;
+            let token_bytes = read_bytes(bytes, &mut pos, token_len)?;
+            let token = std::str::from_utf8(token_bytes)
+                .map_err(|_| TglyphError::MalformedBinary("dictionary entry is not valid UTF-8"))?
+                .to_string();
+            dict.push(token);
+        }
+
+        Ok(Self {
+            bytes,
+            pos,
+            width,
+            height,
+            fps,
+            include_color,
+            frame_count,
+            dict,
+            next_index: 0,
+            previous: None,
+        })
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn fps(&self) -> f32 {
+        self.fps
+    }
+
+    pub fn include_color(&self) -> bool {
+        self.include_color
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.frame_count
+    }
+
+    fn decode_next_frame(&mut self) -> Result<TextCanvas, TglyphError> {
+        let cell_count = self.width * self.height;
+        let i = self.next_index;
+
         if i == 0 {
             let mut cells = Vec::with_capacity(cell_count);
             for _ in 0..cell_count {
-                let idx = read_varint(bytes, &mut pos)? as usize;
-                let token = dict
+                let idx = read_varint(self.bytes, &mut self.pos)? as usize;
+                let token = self
+                    .dict
                     .get(idx)
                     .ok_or(TglyphError::MalformedBinary(
                         "dictionary index out of range",
                     ))?
                     .clone();
-                let color = read_cell_color(bytes, &mut pos)?;
+                let color = read_cell_color(self.bytes, self.include_color, &mut self.pos)?;
                 cells.push(TextCell {
                     token,
                     score: 0.0,
@@ -311,45 +372,94 @@ pub fn decode(bytes: &[u8]) -> Result<TglyphAnimation, TglyphError> {
                     color,
                 });
             }
-            frames.push(TextCanvas {
-                width,
-                height,
+            Ok(TextCanvas {
+                width: self.width,
+                height: self.height,
                 cells,
-            });
+            })
         } else {
-            let mut canvas = frames[i - 1].clone();
-            let change_count = read_varint(bytes, &mut pos)? as usize;
+            let mut canvas = self
+                .previous
+                .clone()
+                .expect("previous frame is set for every index after the first");
+            let change_count = read_varint(self.bytes, &mut self.pos)? as usize;
             let mut last_idx: i64 = -1;
             for _ in 0..change_count {
-                let zz = read_varint(bytes, &mut pos)?;
+                let zz = read_varint(self.bytes, &mut self.pos)?;
                 let delta = zigzag_decode(zz);
                 let cell_idx = last_idx + delta;
                 last_idx = cell_idx;
                 if cell_idx < 0 || cell_idx as usize >= cell_count {
                     return Err(TglyphError::DeltaOutOfRange(
                         i,
-                        cell_idx.max(0) as usize / width.max(1),
-                        cell_idx.max(0) as usize % width.max(1),
-                        width,
-                        height,
+                        cell_idx.max(0) as usize / self.width.max(1),
+                        cell_idx.max(0) as usize % self.width.max(1),
+                        self.width,
+                        self.height,
                     ));
                 }
-                let dict_idx = read_varint(bytes, &mut pos)? as usize;
-                let token = dict
+                let dict_idx = read_varint(self.bytes, &mut self.pos)? as usize;
+                let token = self
+                    .dict
                     .get(dict_idx)
                     .ok_or(TglyphError::MalformedBinary(
                         "dictionary index out of range",
                     ))?
                     .clone();
-                let color = read_cell_color(bytes, &mut pos)?;
+                let color = read_cell_color(self.bytes, self.include_color, &mut self.pos)?;
                 let cell = &mut canvas.cells[cell_idx as usize];
                 cell.token = token;
-                if include_color {
+                if self.include_color {
                     cell.color = color;
                 }
             }
-            frames.push(canvas);
+            Ok(canvas)
         }
+    }
+}
+
+impl Iterator for BinaryFrameReader<'_> {
+    type Item = Result<TextCanvas, TglyphError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next_index >= self.frame_count {
+            return None;
+        }
+        let result = self.decode_next_frame();
+        self.next_index += 1;
+        match result {
+            Ok(canvas) => {
+                self.previous = Some(canvas.clone());
+                Some(Ok(canvas))
+            }
+            Err(error) => {
+                // Stop iterating on the first error rather than retrying;
+                // `next_index` is already past `frame_count`'s reach isn't
+                // guaranteed, so force future calls to return `None` too.
+                self.next_index = self.frame_count;
+                Some(Err(error))
+            }
+        }
+    }
+}
+
+/// Decodes a v2 binary buffer back into a [`TglyphAnimation`]. Callers
+/// should check [`is_binary`] first (or go through
+/// `TglyphAnimation::decode`, which does this automatically).
+///
+/// This fully materializes every frame; prefer [`BinaryFrameReader`]
+/// directly when memory-bounded playback matters (see its docs).
+pub fn decode(bytes: &[u8]) -> Result<TglyphAnimation, TglyphError> {
+    let reader = BinaryFrameReader::new(bytes)?;
+    let width = reader.width();
+    let height = reader.height();
+    let fps = reader.fps();
+    let include_color = reader.include_color();
+    let frame_count = reader.frame_count();
+
+    let mut frames: Vec<TextCanvas> = Vec::with_capacity(frame_count);
+    for frame in reader {
+        frames.push(frame?);
     }
 
     Ok(TglyphAnimation {
@@ -486,5 +596,29 @@ mod tests {
         let f0 = canvas(&["a", "b", "c", "d"], 2, None);
         let anim = TglyphAnimation::encode(std::slice::from_ref(&f0), 24.0, false).unwrap();
         assert_eq!(encode(&anim), encode(&anim));
+    }
+
+    #[test]
+    fn binary_frame_reader_streams_the_same_frames_as_full_decode() {
+        // Regression test for the `topoglyph play` OOM: BinaryFrameReader
+        // must decode identically to `decode`, one frame at a time, without
+        // requiring `frame_count` frames to already be materialized.
+        let f0 = canvas(&["a", "b", "c", "d"], 2, None);
+        let f1 = canvas(&["a", "x", "c", "d"], 2, None);
+        let f2 = canvas(&["a", "x", "y", "d"], 2, None);
+        let anim =
+            TglyphAnimation::encode(&[f0.clone(), f1.clone(), f2.clone()], 24.0, false).unwrap();
+        let bytes = encode(&anim);
+
+        let full = decode(&bytes).unwrap();
+        let reader = BinaryFrameReader::new(&bytes).unwrap();
+        assert_eq!(reader.width(), full.width);
+        assert_eq!(reader.height(), full.height);
+        assert_eq!(reader.fps(), full.fps);
+        assert_eq!(reader.include_color(), full.include_color);
+        assert_eq!(reader.frame_count(), full.frames.len());
+
+        let streamed: Vec<TextCanvas> = reader.collect::<Result<_, _>>().unwrap();
+        assert_eq!(streamed, full.frames);
     }
 }

@@ -7,7 +7,6 @@ use topoglyph::core::clipping;
 use topoglyph::core::geometry::GridOptions;
 use topoglyph::core::matching::{self, MatchOptions, MatchWeights};
 use topoglyph::input::adapter::{self, SmoothingOptions};
-use topoglyph::output::animation::TglyphAnimation;
 use topoglyph::output::encoder::{
     AnsiEncoder, DebugSvgEncoder, HtmlEncoder, JsonDebugEncoder, PlainTextEncoder, TextEncoder,
 };
@@ -65,7 +64,7 @@ struct RenderArgs {
     input: String,
 
     /// Width of the output text grid. Omit both width and height to derive a
-    /// resolution-aware grid from the source, capped at 600×300 cells.
+    /// resolution-aware grid from the source, capped at 120×60 cells.
     #[arg(short = 'W', long)]
     width: Option<usize>,
 
@@ -148,8 +147,8 @@ struct VideoArgs {
     #[arg(short = 'o', long)]
     output: String,
 
-    /// Width of the output text grid (omit to auto-fit the current
-    /// terminal's column count; falls back to 120 when stdout isn't a TTY).
+    /// Width of the output text grid. Omit both width and height to derive a
+    /// resolution-aware grid from the source, capped at 120×60 cells.
     #[arg(short = 'W', long)]
     width: Option<usize>,
 
@@ -442,6 +441,23 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
     };
     let output_file = std::fs::File::create(&args.output)
         .map_err(|e| format!("Failed to create '{}': {e}", args.output))?;
+
+    // Determinate when the container reports a usable frame count (most
+    // well-formed video files); falls back to an indeterminate spinner
+    // (still shows elapsed time and a moving indicator) for inputs where
+    // it can't be probed, e.g. some streamed/live-recorded sources.
+    let progress = match topoglyph::video::probe_frame_count(std::path::Path::new(&args.input)) {
+        Some(total) => indicatif::ProgressBar::new(total),
+        None => indicatif::ProgressBar::new_spinner(),
+    };
+    progress.set_style(
+        indicatif::ProgressStyle::with_template(
+            "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} frames ({eta})",
+        )
+        .unwrap_or_else(|_| indicatif::ProgressStyle::default_bar())
+        .progress_chars("#>-"),
+    );
+
     let conversion = topoglyph::video::convert_video_file_to_writer(
         std::path::Path::new(&args.input),
         &atlas,
@@ -453,7 +469,9 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
             format,
         },
         output_file,
+        |written| progress.set_position(written as u64),
     );
+    progress.finish_and_clear();
     let (summary, output_file) = match conversion {
         Ok(result) => result,
         Err(error) => {
@@ -507,15 +525,29 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
 fn run_play(args: PlayArgs) -> Result<(), String> {
     let bytes =
         std::fs::read(&args.input).map_err(|e| format!("Failed to read '{}': {e}", args.input))?;
-    let animation = TglyphAnimation::from_bytes(&bytes)
-        .map_err(|e| format!("Failed to parse animation: {e}"))?;
 
-    if animation.frames.is_empty() {
+    // Only the header (width/height/fps/frame_count) is read up front; each
+    // pass below streams frames one at a time via `PlaybackFrames` instead
+    // of materializing every decoded `TextCanvas` (see that type's docs).
+    // This is what lets `play` handle arbitrarily long animations (a full
+    // `bad-apple.mp4` conversion is thousands of frames) without exhausting
+    // memory decoding the whole thing before the first frame ever draws.
+    let header =
+        PlaybackFrames::new(&bytes).map_err(|e| format!("Failed to parse animation: {e}"))?;
+    let (width, height, fps, frame_count) = (
+        header.width(),
+        header.height(),
+        header.fps(),
+        header.frame_count(),
+    );
+    drop(header);
+
+    if frame_count == 0 {
         return Ok(());
     }
 
-    let frame_duration = if animation.fps > 0.0 {
-        Duration::from_secs_f32(1.0 / animation.fps)
+    let frame_duration = if fps > 0.0 {
+        Duration::from_secs_f32(1.0 / fps)
     } else {
         Duration::from_secs_f32(1.0 / 24.0)
     };
@@ -528,9 +560,9 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
     // launch, not live-resizing.
     let (term_cols, term_rows) = terminal_size::terminal_size()
         .map(|(terminal_size::Width(w), terminal_size::Height(h))| (w as usize, h as usize))
-        .unwrap_or((animation.width, animation.height));
-    let left_pad = " ".repeat(term_cols.saturating_sub(animation.width) / 2);
-    let top_pad = "\n".repeat(term_rows.saturating_sub(animation.height) / 2);
+        .unwrap_or((width, height));
+    let left_pad = " ".repeat(term_cols.saturating_sub(width) / 2);
+    let top_pad = "\n".repeat(term_rows.saturating_sub(height) / 2);
 
     // Prefer the compact M4A sidecar written by current versions, while
     // retaining read-only support for legacy `.tglyph.wav` pairs.
@@ -580,13 +612,22 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
     let _ = write!(stdout, "\x1b[2J\x1b[H{top_pad}");
 
     loop {
-        for canvas in &animation.frames {
+        // Re-open a fresh streaming reader each pass: the readers only move
+        // forward, so looping means starting over from the same in-memory
+        // `bytes` rather than re-reading the file.
+        let mut frames =
+            PlaybackFrames::new(&bytes).map_err(|e| format!("Failed to parse animation: {e}"))?;
+
+        while let Some(canvas) = frames
+            .next_frame()
+            .map_err(|e| format!("Failed to parse animation: {e}"))?
+        {
             let frame_start = Instant::now();
 
             let encoded = if args.no_color {
-                PlainTextEncoder::new().encode(canvas)
+                PlainTextEncoder::new().encode(&canvas)
             } else {
-                AnsiEncoder::new().encode(canvas)
+                AnsiEncoder::new().encode(&canvas)
             }
             .map_err(|e| format!("Failed to encode frame: {e}"))?;
 
@@ -613,6 +654,79 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Format-agnostic view over either streaming frame reader
+/// (`topoglyph::output::animation::{TextFrameReader, BinaryFrameReader}`),
+/// picked once based on the buffer's magic bytes (mirroring
+/// `TglyphAnimation::from_bytes`'s dispatch) so `run_play` doesn't need to
+/// match on the format at every call site.
+enum PlaybackFrames<'a> {
+    Text(topoglyph::output::animation::TextFrameReader<'a>),
+    Binary(topoglyph::output::binary::BinaryFrameReader<'a>),
+}
+
+impl<'a> PlaybackFrames<'a> {
+    fn new(bytes: &'a [u8]) -> Result<Self, topoglyph::output::animation::TglyphError> {
+        if topoglyph::output::binary::is_binary(bytes) {
+            Ok(Self::Binary(
+                topoglyph::output::binary::BinaryFrameReader::new(bytes)?,
+            ))
+        } else {
+            let text = std::str::from_utf8(bytes).map_err(|_| {
+                topoglyph::output::animation::TglyphError::MalformedHeader(
+                    "magic",
+                    "TGLYPHB2 or TOPOGLYPH-ANIM v1",
+                    "<invalid UTF-8, and not v2 binary magic>".to_string(),
+                )
+            })?;
+            Ok(Self::Text(
+                topoglyph::output::animation::TextFrameReader::new(text)?,
+            ))
+        }
+    }
+
+    fn next_frame(
+        &mut self,
+    ) -> Result<
+        Option<topoglyph::core::canvas::TextCanvas>,
+        topoglyph::output::animation::TglyphError,
+    > {
+        match self {
+            Self::Text(reader) => reader.next_frame(),
+            Self::Binary(reader) => reader.next().transpose(),
+        }
+    }
+}
+
+impl PlaybackFrames<'_> {
+    fn width(&self) -> usize {
+        match self {
+            Self::Text(reader) => reader.width(),
+            Self::Binary(reader) => reader.width(),
+        }
+    }
+
+    fn height(&self) -> usize {
+        match self {
+            Self::Text(reader) => reader.height(),
+            Self::Binary(reader) => reader.height(),
+        }
+    }
+
+    fn fps(&self) -> f32 {
+        match self {
+            Self::Text(reader) => reader.fps(),
+            Self::Binary(reader) => reader.fps(),
+        }
+    }
+
+    fn frame_count(&self) -> usize {
+        match self {
+            Self::Text(reader) => reader.frame_count(),
+            Self::Binary(reader) => reader.frame_count(),
+        }
+    }
 }
 
 /// Known top-level subcommands/flags. Anything else in `argv[1]` is treated

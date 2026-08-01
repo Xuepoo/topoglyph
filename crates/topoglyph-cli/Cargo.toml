@@ -18,6 +18,7 @@ serde_json = "1.0.151"
 rayon = { workspace = true }
 terminal_size = "0.4.4"
 rodio = { version = "0.22", default-features = false, features = ["mp4", "wav", "playback"] }
+indicatif = "0.17.8"
 
 [features]
 default = ["video"]
