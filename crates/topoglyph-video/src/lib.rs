@@ -231,6 +231,38 @@ impl Drop for InFlightPermit {
     }
 }
 
+/// Probes the video's total decodable frame count for progress reporting,
+/// without decoding any frames. Prefers the container's `nb_frames` field
+/// (present for most well-formed containers); when that's absent or zero
+/// (some streamed/live-recorded sources omit it), falls back to
+/// `duration * avg_frame_rate`. Returns `None` if neither is available or
+/// the video can't be opened -- callers should fall back to an
+/// indeterminate progress indicator in that case.
+pub fn probe_frame_count(path: &std::path::Path) -> Option<u64> {
+    let ictx = ffmpeg_next::format::input(path).ok()?;
+    let stream = ictx.streams().best(ffmpeg_next::media::Type::Video)?;
+
+    let declared = stream.frames();
+    if declared > 0 {
+        return Some(declared as u64);
+    }
+
+    let duration = stream.duration();
+    let time_base = stream.time_base();
+    let avg_rate = stream.avg_frame_rate();
+    if duration > 0 && time_base.denominator() > 0 && avg_rate.denominator() > 0 {
+        let duration_secs =
+            duration as f64 * time_base.numerator() as f64 / time_base.denominator() as f64;
+        let fps = avg_rate.numerator() as f64 / avg_rate.denominator() as f64;
+        let estimate = (duration_secs * fps).round();
+        if estimate.is_finite() && estimate > 0.0 {
+            return Some(estimate as u64);
+        }
+    }
+
+    None
+}
+
 /// Converts a video directly into a seekable `.tglyph` writer without ever
 /// materializing the whole video or animation in memory.
 ///
@@ -239,12 +271,18 @@ impl Drop for InFlightPermit {
 /// can wait for an earlier frame before backpressure stops more rendering.
 /// Ordered frames are written immediately and only the previous canvas is
 /// retained for delta encoding.
+///
+/// `on_frame_written`, if given, is called once per frame immediately after
+/// it's written to `writer`, with the 1-based count of frames written so
+/// far -- callers use this to drive a progress bar without needing to know
+/// about the internal ordering/backpressure machinery.
 pub fn convert_video_file_to_writer<W: Write + Seek>(
     path: &std::path::Path,
     atlas: &GlyphAtlas,
     render_options: &FrameRenderOptions,
     output_options: VideoOutputOptions,
     writer: W,
+    mut on_frame_written: impl FnMut(usize),
 ) -> Result<(VideoConvertSummary, W), VideoConvertError> {
     let VideoOutputOptions {
         fps,
@@ -316,6 +354,7 @@ pub fn convert_video_file_to_writer<W: Write + Seek>(
                     .push_frame(canvas)?;
                 drop(permit);
                 next_index += 1;
+                on_frame_written(next_index);
             }
         }
 

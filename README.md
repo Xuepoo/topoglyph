@@ -51,7 +51,7 @@ topoglyph render <image> [OPTIONS]
 ```
 
 Key Options:
-- `-W, --width <WIDTH>` / `-H, --height <HEIGHT>`: Output grid dimensions. Omit both to derive a resolution-aware grid from the source without upscaling, capped at 600 columns × 300 rows. Set one dimension to derive the other from the source and cell aspect ratios; set both for an exact fixed grid.
+- `-W, --width <WIDTH>` / `-H, --height <HEIGHT>`: Output grid dimensions. Omit both to derive a resolution-aware grid from the source without upscaling, capped at 120 columns × 60 rows. Set one dimension to derive the other from the source and cell aspect ratios; set both for an exact fixed grid.
 - `-C, --charset <CHARSET>`: Output character set (`lines`, `ascii`, `blocks`, `braille`, `custom`).
 - `--font <PATH>` & `--custom-chars <STRING>`: Specify a custom TTF/OTF font and character pool for mapping.
 - `--glyph-mode <MODE>`: Select character mapping mode (`set` or `weighted`).

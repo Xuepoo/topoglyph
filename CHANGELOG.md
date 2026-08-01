@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-08-01
+
+### Fixed
+- **0.3.0's Auto grid caps (600x300) regressed sizing for anything at or above roughly 480px wide**, producing a near-pixel-for-pixel grid instead of a downsampled one: `.tglyph` output ballooned 5-16x, lines were too wide for a real terminal (breaking even `cat`), and `topoglyph play` could exhaust memory materializing every frame at the inflated cell count on longer videos. Automatic caps are back to the terminal-sane `120x60` (matching the historical fixed 120-column default; one character cell corresponds to several source pixels, not one).
+- **`topoglyph play` fully materialized every decoded frame (`Vec<TextCanvas>`) before playback started**, so a long `.tglyph` animation's entire decoded size had to fit in memory at once. `topoglyph_output::animation` now exposes `TextFrameReader`/`crate::binary::BinaryFrameReader`, which decode one frame at a time (keeping only the previous frame needed for delta application); `play` streams through these instead of `TglyphAnimation::from_bytes`, so playback memory stays bounded regardless of animation length. `TglyphAnimation::decode`/`crate::binary::decode` (full materialization) are retained and now build on top of the same streaming readers.
+- **`AnsiEncoder` appended an unconditional trailing color reset after the last row's newline**, which became its own phantom line once split on `.lines()` in `topoglyph-cli`'s playback loop -- every colored `.tglyph` frame printed one extra row, causing terminal playback to visibly drift down over time. The reset now lands before the final newline and only when a color is still active.
+
+### Added
+- **`topoglyph video` conversion progress bar**: shows a determinate progress bar (frames written / total, with ETA) when the input's frame count can be probed from its container metadata, falling back to an indeterminate spinner otherwise. Backed by `indicatif`; frame count is probed via `topoglyph_video::probe_frame_count` without decoding any frames.
+
 ## [0.3.0] - 2026-08-01
 
 ### Changed

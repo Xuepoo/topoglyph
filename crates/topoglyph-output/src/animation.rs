@@ -187,109 +187,21 @@ impl TglyphAnimation {
     /// Parses a `.tglyph` text document back into an animation, fully
     /// materializing every frame (applying each delta on top of the
     /// previous frame's decoded canvas).
+    ///
+    /// Prefer [`TextFrameReader`] directly when memory-bounded playback of
+    /// a large animation matters (see its docs); this fully materializes
+    /// every frame up front.
     pub fn decode(text: &str) -> Result<Self, TglyphError> {
-        let mut lines = text.lines();
-
-        let magic = lines.next().ok_or(TglyphError::EmptyInput)?;
-        if magic != "TOPOGLYPH-ANIM v1" {
-            return Err(TglyphError::MalformedHeader(
-                "magic",
-                "TOPOGLYPH-ANIM v1",
-                magic.to_string(),
-            ));
-        }
-
-        let width = parse_header_usize(lines.next(), "WIDTH")?;
-        let height = parse_header_usize(lines.next(), "HEIGHT")?;
-        let fps = parse_header_f32(lines.next(), "FPS")?;
-        let include_color = parse_header_color(lines.next())?;
-        let frame_count = parse_header_usize(lines.next(), "FRAMES")?;
+        let mut reader = TextFrameReader::new(text)?;
+        let width = reader.width;
+        let height = reader.height;
+        let fps = reader.fps;
+        let include_color = reader.include_color;
+        let frame_count = reader.frame_count;
 
         let mut frames: Vec<TextCanvas> = Vec::with_capacity(frame_count);
-
-        for i in 0..frame_count {
-            let marker = lines
-                .next()
-                .ok_or_else(|| TglyphError::UnexpectedFrameMarker(i, String::new()))?;
-            let expected_marker = if i == 0 {
-                "---F0---".to_string()
-            } else {
-                format!("---D{i}---")
-            };
-            if marker != expected_marker {
-                return Err(TglyphError::UnexpectedFrameMarker(i, marker.to_string()));
-            }
-
-            if i == 0 {
-                let mut cells = Vec::with_capacity(width * height);
-                for row in 0..height {
-                    let line = lines
-                        .next()
-                        .ok_or(TglyphError::FrameRowCountMismatch(0, height, row))?;
-                    let chars: Vec<char> = line.chars().collect();
-                    if chars.len() != width {
-                        return Err(TglyphError::FrameColumnCountMismatch(
-                            0,
-                            row,
-                            chars.len(),
-                            width,
-                        ));
-                    }
-                    for ch in chars {
-                        cells.push(TextCell {
-                            token: ch.to_string(),
-                            score: 0.0,
-                            source_path: None,
-                            color: None,
-                        });
-                    }
-                }
-
-                if include_color {
-                    let color_marker = lines
-                        .next()
-                        .ok_or_else(|| TglyphError::UnexpectedFrameMarker(0, String::new()))?;
-                    if color_marker != "---C0---" {
-                        return Err(TglyphError::UnexpectedFrameMarker(
-                            0,
-                            color_marker.to_string(),
-                        ));
-                    }
-                    loop {
-                        let mut peek = lines.clone();
-                        match peek.next() {
-                            None => break,
-                            Some(next_line) if next_line.starts_with("---") => break,
-                            _ => {}
-                        }
-                        let line = lines.next().unwrap();
-                        apply_color_line(&mut cells, width, height, 0, line)?;
-                    }
-                }
-
-                frames.push(TextCanvas {
-                    width,
-                    height,
-                    cells,
-                });
-            } else {
-                let mut canvas = frames[i - 1].clone();
-                // Delta lines run until the next frame marker or EOF; since
-                // we don't know the delta's line count up front, peek ahead
-                // by cloning the iterator rather than consuming lines that
-                // belong to the next marker.
-                loop {
-                    let mut peek = lines.clone();
-                    match peek.next() {
-                        None => break,
-                        Some(next_line) if next_line.starts_with("---") => break,
-                        _ => {}
-                    }
-                    let line = lines.next().unwrap();
-                    apply_delta_line(&mut canvas, i, line, include_color)?;
-                }
-                frames.push(canvas);
-            }
+        while let Some(frame) = reader.next_frame()? {
+            frames.push(frame);
         }
 
         Ok(Self {
@@ -329,6 +241,189 @@ impl TglyphAnimation {
                 )
             })?;
             Self::decode(text)
+        }
+    }
+}
+
+/// Streams frames out of a v1 text `.tglyph` document one at a time instead
+/// of materializing every decoded [`TextCanvas`] up front. Only the header
+/// fields and the single most-recently-decoded frame (needed to apply the
+/// next delta) are kept in memory regardless of `frame_count` — this is
+/// what lets `topoglyph play` play back arbitrarily long text-format
+/// animations without their full decoded size ever fitting in RAM at once.
+///
+/// Construct via [`TextFrameReader::new`], read `width`/`height`/`fps`/
+/// `frame_count`/`include_color` up front, then call
+/// [`TextFrameReader::next_frame`] repeatedly until it returns `None`.
+pub struct TextFrameReader<'a> {
+    lines: std::str::Lines<'a>,
+    width: usize,
+    height: usize,
+    fps: f32,
+    include_color: bool,
+    frame_count: usize,
+    next_index: usize,
+    previous: Option<TextCanvas>,
+}
+
+impl<'a> TextFrameReader<'a> {
+    /// Parses the header only; no frame data is decoded until
+    /// [`Self::next_frame`] is first called.
+    pub fn new(text: &'a str) -> Result<Self, TglyphError> {
+        let mut lines = text.lines();
+
+        let magic = lines.next().ok_or(TglyphError::EmptyInput)?;
+        if magic != "TOPOGLYPH-ANIM v1" {
+            return Err(TglyphError::MalformedHeader(
+                "magic",
+                "TOPOGLYPH-ANIM v1",
+                magic.to_string(),
+            ));
+        }
+
+        let width = parse_header_usize(lines.next(), "WIDTH")?;
+        let height = parse_header_usize(lines.next(), "HEIGHT")?;
+        let fps = parse_header_f32(lines.next(), "FPS")?;
+        let include_color = parse_header_color(lines.next())?;
+        let frame_count = parse_header_usize(lines.next(), "FRAMES")?;
+
+        Ok(Self {
+            lines,
+            width,
+            height,
+            fps,
+            include_color,
+            frame_count,
+            next_index: 0,
+            previous: None,
+        })
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn fps(&self) -> f32 {
+        self.fps
+    }
+
+    pub fn include_color(&self) -> bool {
+        self.include_color
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.frame_count
+    }
+
+    /// Decodes and returns the next frame, or `None` once `frame_count`
+    /// frames have been produced. On error, subsequent calls also return
+    /// `None` rather than retrying.
+    pub fn next_frame(&mut self) -> Result<Option<TextCanvas>, TglyphError> {
+        if self.next_index >= self.frame_count {
+            return Ok(None);
+        }
+        let i = self.next_index;
+        let result = self.decode_next_frame(i);
+        self.next_index += 1;
+        if result.is_err() {
+            self.next_index = self.frame_count;
+        }
+        result.map(|canvas| {
+            self.previous = Some(canvas.clone());
+            Some(canvas)
+        })
+    }
+
+    fn decode_next_frame(&mut self, i: usize) -> Result<TextCanvas, TglyphError> {
+        let width = self.width;
+        let height = self.height;
+        let marker = self
+            .lines
+            .next()
+            .ok_or_else(|| TglyphError::UnexpectedFrameMarker(i, String::new()))?;
+        let expected_marker = if i == 0 {
+            "---F0---".to_string()
+        } else {
+            format!("---D{i}---")
+        };
+        if marker != expected_marker {
+            return Err(TglyphError::UnexpectedFrameMarker(i, marker.to_string()));
+        }
+
+        if i == 0 {
+            let mut cells = Vec::with_capacity(width * height);
+            for row in 0..height {
+                let line = self
+                    .lines
+                    .next()
+                    .ok_or(TglyphError::FrameRowCountMismatch(0, height, row))?;
+                let chars: Vec<char> = line.chars().collect();
+                if chars.len() != width {
+                    return Err(TglyphError::FrameColumnCountMismatch(
+                        0,
+                        row,
+                        chars.len(),
+                        width,
+                    ));
+                }
+                for ch in chars {
+                    cells.push(TextCell {
+                        token: ch.to_string(),
+                        score: 0.0,
+                        source_path: None,
+                        color: None,
+                    });
+                }
+            }
+
+            if self.include_color {
+                let color_marker = self
+                    .lines
+                    .next()
+                    .ok_or_else(|| TglyphError::UnexpectedFrameMarker(0, String::new()))?;
+                if color_marker != "---C0---" {
+                    return Err(TglyphError::UnexpectedFrameMarker(
+                        0,
+                        color_marker.to_string(),
+                    ));
+                }
+                loop {
+                    let mut peek = self.lines.clone();
+                    match peek.next() {
+                        None => break,
+                        Some(next_line) if next_line.starts_with("---") => break,
+                        _ => {}
+                    }
+                    let line = self.lines.next().unwrap();
+                    apply_color_line(&mut cells, width, height, 0, line)?;
+                }
+            }
+
+            Ok(TextCanvas {
+                width,
+                height,
+                cells,
+            })
+        } else {
+            let mut canvas = self
+                .previous
+                .clone()
+                .expect("previous frame is set for every index after the first");
+            loop {
+                let mut peek = self.lines.clone();
+                match peek.next() {
+                    None => break,
+                    Some(next_line) if next_line.starts_with("---") => break,
+                    _ => {}
+                }
+                let line = self.lines.next().unwrap();
+                apply_delta_line(&mut canvas, i, line, self.include_color)?;
+            }
+            Ok(canvas)
         }
     }
 }
@@ -661,5 +756,32 @@ mod tests {
             let next_marker_pos = section.find("---").unwrap_or(section.len());
             assert_eq!(&section[..next_marker_pos], "");
         }
+    }
+
+    #[test]
+    fn text_frame_reader_streams_the_same_frames_as_full_decode() {
+        // Regression test for the `topoglyph play` OOM: TextFrameReader
+        // must decode identically to `decode`, one frame at a time, without
+        // requiring `frame_count` frames to already be materialized.
+        let f0 = canvas(&["a", "b", "c", "d"], 2, None);
+        let f1 = canvas(&["a", "x", "c", "d"], 2, None);
+        let f2 = canvas(&["a", "x", "y", "d"], 2, None);
+        let anim =
+            TglyphAnimation::encode(&[f0.clone(), f1.clone(), f2.clone()], 24.0, false).unwrap();
+        let text = anim.to_text();
+
+        let full = TglyphAnimation::decode(&text).unwrap();
+        let mut reader = TextFrameReader::new(&text).unwrap();
+        assert_eq!(reader.width(), full.width);
+        assert_eq!(reader.height(), full.height);
+        assert_eq!(reader.fps(), full.fps);
+        assert_eq!(reader.include_color(), full.include_color);
+        assert_eq!(reader.frame_count(), full.frames.len());
+
+        let mut streamed = Vec::new();
+        while let Some(frame) = reader.next_frame().unwrap() {
+            streamed.push(frame);
+        }
+        assert_eq!(streamed, full.frames);
     }
 }

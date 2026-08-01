@@ -1,14 +1,21 @@
 use bitflags::bitflags;
 
-pub const MAX_AUTO_COLUMNS: usize = 600;
-pub const MAX_AUTO_ROWS: usize = 300;
+pub const MAX_AUTO_COLUMNS: usize = 120;
+pub const MAX_AUTO_ROWS: usize = 60;
 
 /// Defines the grid dimensions and subcell resolution for mapping.
 ///
 /// Leaving both `columns` and `rows` unset derives a resolution-aware grid
 /// from the source image while preserving its physical aspect ratio. Fully
 /// automatic grids never upscale the source and are capped at
-/// [`MAX_AUTO_COLUMNS`] by [`MAX_AUTO_ROWS`].
+/// [`MAX_AUTO_COLUMNS`] by [`MAX_AUTO_ROWS`] — matching the historical
+/// terminal-sane 120-column default (`terminal_size` falls back to 120 when
+/// stdout isn't a TTY). A 600x300 cap (5x this) was tried in 0.3.0 and
+/// reverted: for any source at or above roughly 480px wide it produced a
+/// near-pixel-for-pixel grid instead of a downsampled one, which broke `cat`
+/// output (lines too wide for any real terminal), bloated `.tglyph` files by
+/// 5-16x, and made `topoglyph play` materialize enough `TextCanvas` frames to
+/// exhaust memory on multi-minute videos.
 pub struct GridOptions {
     pub columns: Option<usize>,
     pub rows: Option<usize>,
@@ -187,7 +194,7 @@ mod tests {
         };
 
         assert_eq!(options.columns, None);
-        assert_eq!(options.resolve_dimensions((250, 250)), (250, 150));
+        assert_eq!(options.resolve_dimensions((250, 250)), (100, 60));
     }
 
     #[test]
@@ -197,8 +204,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(options.resolve_dimensions((1280, 577)), (600, 162));
-        assert_eq!(options.resolve_dimensions((400, 800)), (250, 300));
+        assert_eq!(options.resolve_dimensions((1280, 577)), (120, 32));
+        assert_eq!(options.resolve_dimensions((400, 800)), (50, 60));
     }
 
     #[test]
