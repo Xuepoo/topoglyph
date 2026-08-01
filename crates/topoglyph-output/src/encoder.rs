@@ -59,6 +59,7 @@ impl TextEncoder for AnsiEncoder {
     fn encode(&self, canvas: &TextCanvas) -> Result<Vec<u8>, Self::Error> {
         let mut result = String::new();
         let mut last_color = None;
+        let total = canvas.cells.len();
 
         for (i, cell) in canvas.cells.iter().enumerate() {
             if cell.color != last_color {
@@ -75,11 +76,25 @@ impl TextEncoder for AnsiEncoder {
             }
 
             result.push_str(&cell.token);
+
+            // Reset before the row's newline (not after), and only when a
+            // color is still active. Emitting it unconditionally after the
+            // trailing '\n' turns the reset into its own phantom row once
+            // split on lines (see `run_play`'s `.lines()` loop), which is
+            // exactly what pushed terminal playback down by one row on
+            // every colored frame.
+            let is_last_cell = i + 1 == total;
+            if is_last_cell && last_color.is_some() {
+                result.push_str("\x1b[0m");
+                last_color = None;
+            }
             if (i + 1) % canvas.width == 0 {
                 result.push('\n');
             }
         }
-        result.push_str("\x1b[0m"); // reset at end
+        if last_color.is_some() {
+            result.push_str("\x1b[0m");
+        }
         Ok(result.into_bytes())
     }
 }
@@ -346,20 +361,38 @@ mod tests {
         let out = AnsiEncoder::new().encode(&canvas).unwrap();
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("\x1b[38;2;255;0;0m"));
-        assert!(text.ends_with("\x1b[0m"));
+        // The color turns off again at cell 1 (see
+        // `ansi_encoder_resets_color_before_end_of_row_when_it_changes_mid_row`),
+        // so the reset for *this* run lands right after 'a', not at the
+        // very end of the string.
+        assert!(text.contains("\x1b[38;2;255;0;0ma\x1b[0m"));
     }
 
     #[test]
-    fn ansi_encoder_only_emits_escape_on_color_change() {
-        let canvas = canvas_2x2(
-            ["a", "b", "c", "d"],
-            [Some("#ff0000"), Some("#ff0000"), None, None],
-        );
+    fn ansi_encoder_resets_active_color_before_final_newline_not_after() {
+        // Regression test for the "output drifts down one row per frame"
+        // bug: a trailing reset appended *after* the last row's '\n'
+        // becomes its own phantom line once callers split on `.lines()`
+        // (see `topoglyph-cli`'s `run_play`), silently growing every
+        // colored frame by one extra printed row.
+        let canvas = canvas_2x2(["a", "b", "c", "d"], [None, None, None, Some("#00ff00")]);
         let out = AnsiEncoder::new().encode(&canvas).unwrap();
         let text = String::from_utf8(out).unwrap();
-        // The color escape should appear exactly once for the two
-        // consecutive same-colored cells, not once per cell.
-        assert_eq!(text.matches("\x1b[38;2;255;0;0m").count(), 1);
+        assert_eq!(text.lines().count(), 2, "reset must not add a phantom line");
+        assert!(text.ends_with("\x1b[0m\n"));
+    }
+
+    #[test]
+    fn ansi_encoder_emits_no_trailing_reset_when_color_already_off() {
+        // When the active color already turned off before the final cell,
+        // there is nothing left to reset — the encoder must not append an
+        // unconditional reset that the caller would then see as an empty
+        // trailing line.
+        let canvas = canvas_2x2(["a", "b", "c", "d"], [Some("#ff0000"), None, None, None]);
+        let out = AnsiEncoder::new().encode(&canvas).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), 2);
+        assert!(!text.ends_with("\x1b[0m\n\x1b[0m"));
     }
 
     fn canvas_2x2_scored(tokens: [&str; 4], scores: [f32; 4]) -> TextCanvas {

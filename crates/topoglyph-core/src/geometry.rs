@@ -1,18 +1,74 @@
 use bitflags::bitflags;
 
+pub const MAX_AUTO_COLUMNS: usize = 600;
+pub const MAX_AUTO_ROWS: usize = 300;
+
 /// Defines the grid dimensions and subcell resolution for mapping.
+///
+/// Leaving both `columns` and `rows` unset derives a resolution-aware grid
+/// from the source image while preserving its physical aspect ratio. Fully
+/// automatic grids never upscale the source and are capped at
+/// [`MAX_AUTO_COLUMNS`] by [`MAX_AUTO_ROWS`].
 pub struct GridOptions {
-    pub columns: usize,
+    pub columns: Option<usize>,
     pub rows: Option<usize>,
     pub cell_aspect_ratio: f32,
     pub subcell_width: u8,
     pub subcell_height: u8,
 }
 
+impl GridOptions {
+    /// Resolves the effective text grid for a source image.
+    ///
+    /// An explicit dimension is always honored. If exactly one dimension is
+    /// explicit, the other is derived from the source and cell aspect ratios.
+    /// The automatic caps apply only when neither dimension is explicit.
+    pub fn resolve_dimensions(&self, source_dimensions: (u32, u32)) -> (usize, usize) {
+        let source_width = f64::from(source_dimensions.0.max(1));
+        let source_height = f64::from(source_dimensions.1.max(1));
+        let cell_aspect_ratio = {
+            let ratio = f64::from(self.cell_aspect_ratio);
+            if ratio.is_finite() && ratio > 0.0 {
+                ratio
+            } else {
+                0.5
+            }
+        };
+
+        match (self.columns, self.rows) {
+            (Some(columns), Some(rows)) => (columns.max(1), rows.max(1)),
+            (Some(columns), None) => {
+                let columns = columns.max(1);
+                let rows =
+                    (columns as f64 * source_height / source_width * cell_aspect_ratio).round();
+                (columns, (rows as usize).max(1))
+            }
+            (None, Some(rows)) => {
+                let rows = rows.max(1);
+                let columns =
+                    (rows as f64 * source_width / source_height / cell_aspect_ratio).round();
+                ((columns as usize).max(1), rows)
+            }
+            (None, None) => {
+                let natural_rows = source_height * cell_aspect_ratio;
+                let scale = 1.0_f64
+                    .min(MAX_AUTO_COLUMNS as f64 / source_width)
+                    .min(MAX_AUTO_ROWS as f64 / natural_rows);
+                let columns = (source_width * scale).round() as usize;
+                let rows = (natural_rows * scale).round() as usize;
+                (
+                    columns.clamp(1, MAX_AUTO_COLUMNS),
+                    rows.clamp(1, MAX_AUTO_ROWS),
+                )
+            }
+        }
+    }
+}
+
 impl Default for GridOptions {
     fn default() -> Self {
         Self {
-            columns: 120,
+            columns: None,
             rows: None,
             cell_aspect_ratio: 0.5,
             subcell_width: 16,
@@ -117,4 +173,66 @@ pub struct CellDescriptor {
     pub curvature: f32,
     pub stroke_count: u8,
     pub color: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GridOptions;
+
+    #[test]
+    fn default_grid_tracks_square_source_resolution() {
+        let options = GridOptions {
+            cell_aspect_ratio: 0.6,
+            ..Default::default()
+        };
+
+        assert_eq!(options.columns, None);
+        assert_eq!(options.resolve_dimensions((250, 250)), (250, 150));
+    }
+
+    #[test]
+    fn automatic_grid_caps_landscape_and_portrait_sources() {
+        let options = GridOptions {
+            cell_aspect_ratio: 0.6,
+            ..Default::default()
+        };
+
+        assert_eq!(options.resolve_dimensions((1280, 577)), (600, 162));
+        assert_eq!(options.resolve_dimensions((400, 800)), (250, 300));
+    }
+
+    #[test]
+    fn automatic_grid_does_not_upscale_small_sources() {
+        let options = GridOptions::default();
+
+        assert_eq!(options.resolve_dimensions((32, 16)), (32, 8));
+    }
+
+    #[test]
+    fn one_explicit_dimension_derives_the_other_from_aspect() {
+        let width_only = GridOptions {
+            columns: Some(120),
+            cell_aspect_ratio: 0.5,
+            ..Default::default()
+        };
+        let height_only = GridOptions {
+            rows: Some(40),
+            cell_aspect_ratio: 0.5,
+            ..Default::default()
+        };
+
+        assert_eq!(width_only.resolve_dimensions((100, 100)), (120, 60));
+        assert_eq!(height_only.resolve_dimensions((100, 100)), (80, 40));
+    }
+
+    #[test]
+    fn two_explicit_dimensions_are_used_exactly() {
+        let options = GridOptions {
+            columns: Some(120),
+            rows: Some(40),
+            ..Default::default()
+        };
+
+        assert_eq!(options.resolve_dimensions((100, 200)), (120, 40));
+    }
 }

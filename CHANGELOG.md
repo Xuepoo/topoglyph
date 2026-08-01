@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-01
+
+### Changed
+- **Resolution-aware Auto grids:** Leaving both output dimensions unset now derives the text grid from the source pixel dimensions without upscaling, preserves physical aspect through the configured cell ratio, and caps automatic output at 600 columns × 300 rows. This replaces the fixed 120-column default across `topoglyph-core`, still-image CLI rendering, and video conversion. Supplying one dimension derives the other from aspect; supplying both keeps an exact fixed grid.
+- **`GridOptions::columns` and `FrameRenderOptions::columns` are now optional:** `None` selects the shared adaptive resolver. This is a breaking API change for direct Rust consumers; wrap fixed widths in `Some(...)`.
+
 ## [0.2.3] - 2026-08-01
 
 ### Changed

@@ -51,7 +51,7 @@ topoglyph render <image> [OPTIONS]
 ```
 
 常用选项：
-- `-W, --width <WIDTH>` / `-H, --height <HEIGHT>`: 设置输出网格的尺寸。
+- `-W, --width <WIDTH>` / `-H, --height <HEIGHT>`：设置输出网格尺寸。两者均省略时，将按源文件分辨率生成不放大的自适应网格，最大为 600 列 × 300 行。只指定一个尺寸时，另一尺寸按源文件和字符单元格宽高比推导；同时指定时使用精确固定网格。
 - `-C, --charset <CHARSET>`: 设置输出字符集 (`lines`, `ascii`, `blocks`, `braille`, `custom`)。
 - `--font <PATH>` & `--custom-chars <STRING>`: 指定自定义 TTF/OTF 字体文件和用于匹配的字符池。
 - `--glyph-mode <MODE>`: 选择字形映射模式 (`set` 或 `weighted`)。
@@ -71,7 +71,7 @@ topoglyph atlas inspect [OPTIONS]
 
 ### 3. 视频处理子命令 (video)
 
-把视频文件转换为 `.tglyph` 文本动画。颜色默认关闭（需显式传入 `--color` 开启）。`.tglyph` 是一种纯文本的帧差分序列（第一帧全量，后续帧只记录变化的格子），因此在外层叠加 `gzip` 等通用压缩效果极佳：
+把视频文件转换为 `.tglyph` 文本动画。颜色默认关闭（需显式传入 `--color` 开启）。省略 `--width` 和 `--height` 时，视频帧使用与静态图片相同的分辨率自适应网格。`.tglyph` 是一种纯文本的帧差分序列（第一帧全量，后续帧只记录变化的格子），因此在外层叠加 `gzip` 等通用压缩效果极佳：
 
 ```bash
 topoglyph video <input.mp4> -o <output.tglyph> [OPTIONS]
