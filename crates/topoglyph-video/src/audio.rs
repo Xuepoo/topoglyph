@@ -47,16 +47,10 @@ pub fn sidecar_wav_path(tglyph_path: &Path) -> PathBuf {
 /// Returns `Ok(false)` (not an error) if `input` has no audio stream at
 /// all, e.g. a silent screen recording or a GIF — callers should treat
 /// that as "nothing to extract", not a failure.
-pub fn extract_audio_to_wav(
-    input: &Path,
-    wav_path: &Path,
-) -> Result<bool, AudioExtractError> {
+pub fn extract_audio_to_wav(input: &Path, wav_path: &Path) -> Result<bool, AudioExtractError> {
     let mut ictx = ffmpeg_next::format::input(input).map_err(AudioExtractError::Input)?;
 
-    let audio_stream_index = match ictx
-        .streams()
-        .best(ffmpeg_next::media::Type::Audio)
-    {
+    let audio_stream_index = match ictx.streams().best(ffmpeg_next::media::Type::Audio) {
         Some(stream) => stream.index(),
         None => return Ok(false),
     };
@@ -64,7 +58,10 @@ pub fn extract_audio_to_wav(
     let stream = ictx.stream(audio_stream_index).unwrap();
     let context = ffmpeg_next::codec::context::Context::from_parameters(stream.parameters())
         .map_err(AudioExtractError::Decoder)?;
-    let mut decoder = context.decoder().audio().map_err(AudioExtractError::Decoder)?;
+    let mut decoder = context
+        .decoder()
+        .audio()
+        .map_err(AudioExtractError::Decoder)?;
 
     let in_rate = decoder.rate();
     let in_layout = decoder.channel_layout();
@@ -86,14 +83,13 @@ pub fn extract_audio_to_wav(
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
-    let mut writer =
-        hound::WavWriter::create(wav_path, spec).map_err(AudioExtractError::Wav)?;
+    let mut writer = hound::WavWriter::create(wav_path, spec).map_err(AudioExtractError::Wav)?;
 
     let mut decoded = ffmpeg_next::frame::Audio::empty();
     let mut resampled = ffmpeg_next::frame::Audio::empty();
 
     let write_resampled = |resampled: &ffmpeg_next::frame::Audio,
-                            writer: &mut hound::WavWriter<_>|
+                           writer: &mut hound::WavWriter<_>|
      -> Result<(), AudioExtractError> {
         // `plane::<T>()` slices by `samples()` element count, i.e.
         // *per-channel* frame count — for a packed/interleaved format with

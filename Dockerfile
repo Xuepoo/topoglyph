@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libswresample-dev \
     libavdevice-dev \
     libavfilter-dev \
+    libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency manifests and the workspace (topoglyph is a single
@@ -39,6 +40,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     libavutil-dev \
     libswscale-dev \
     libswresample-dev \
+    libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /tmp/topoglyph /usr/local/bin/topoglyph

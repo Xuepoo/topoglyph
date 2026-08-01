@@ -232,7 +232,10 @@ pub fn encode(anim: &TglyphAnimation) -> Vec<u8> {
                 let delta = idx as i64 - last_idx;
                 last_idx = idx as i64;
                 write_varint(&mut out, zigzag_encode(delta));
-                write_varint(&mut out, dict_index[canvas.cells[idx].token.as_str()] as u64);
+                write_varint(
+                    &mut out,
+                    dict_index[canvas.cells[idx].token.as_str()] as u64,
+                );
                 write_cell_color(&mut out, &canvas.cells[idx]);
             }
         }
@@ -296,7 +299,9 @@ pub fn decode(bytes: &[u8]) -> Result<TglyphAnimation, TglyphError> {
                 let idx = read_varint(bytes, &mut pos)? as usize;
                 let token = dict
                     .get(idx)
-                    .ok_or(TglyphError::MalformedBinary("dictionary index out of range"))?
+                    .ok_or(TglyphError::MalformedBinary(
+                        "dictionary index out of range",
+                    ))?
                     .clone();
                 let color = read_cell_color(bytes, &mut pos)?;
                 cells.push(TextCell {
@@ -332,7 +337,9 @@ pub fn decode(bytes: &[u8]) -> Result<TglyphAnimation, TglyphError> {
                 let dict_idx = read_varint(bytes, &mut pos)? as usize;
                 let token = dict
                     .get(dict_idx)
-                    .ok_or(TglyphError::MalformedBinary("dictionary index out of range"))?
+                    .ok_or(TglyphError::MalformedBinary(
+                        "dictionary index out of range",
+                    ))?
                     .clone();
                 let color = read_cell_color(bytes, &mut pos)?;
                 let cell = &mut canvas.cells[cell_idx as usize];
@@ -405,8 +412,8 @@ mod tests {
         let f0 = canvas(&["a", "b", "c", "d"], 2, None);
         let f1 = canvas(&["a", "x", "c", "d"], 2, None);
         let f2 = canvas(&["a", "x", "y", "d"], 2, None);
-        let anim = TglyphAnimation::encode(&[f0.clone(), f1.clone(), f2.clone()], 24.0, false)
-            .unwrap();
+        let anim =
+            TglyphAnimation::encode(&[f0.clone(), f1.clone(), f2.clone()], 24.0, false).unwrap();
         let bytes = encode(&anim);
         let decoded = decode(&bytes).unwrap();
 

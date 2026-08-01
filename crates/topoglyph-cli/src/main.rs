@@ -495,11 +495,9 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
     // produce no sidecar rather than an error.
     let output_path = std::path::Path::new(&args.output);
     let wav_path = topoglyph::video::audio::sidecar_wav_path(output_path);
-    let wrote_audio = topoglyph::video::audio::extract_audio_to_wav(
-        std::path::Path::new(&args.input),
-        &wav_path,
-    )
-    .map_err(|e| format!("Failed to extract audio: {e}"))?;
+    let wrote_audio =
+        topoglyph::video::audio::extract_audio_to_wav(std::path::Path::new(&args.input), &wav_path)
+            .map_err(|e| format!("Failed to extract audio: {e}"))?;
 
     Ok(format!(
         "Wrote {} frames ({} bytes) to {}{}",
@@ -527,8 +525,8 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
 /// device in sync with the frame loop (0.2.2: 播放的时候应该带有音频播放，
 /// 视频应该居中播放).
 fn run_play(args: PlayArgs) -> Result<(), String> {
-    let bytes = std::fs::read(&args.input)
-        .map_err(|e| format!("Failed to read '{}': {e}", args.input))?;
+    let bytes =
+        std::fs::read(&args.input).map_err(|e| format!("Failed to read '{}': {e}", args.input))?;
     let animation = TglyphAnimation::from_bytes(&bytes)
         .map_err(|e| format!("Failed to parse animation: {e}"))?;
 
@@ -549,9 +547,7 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
     // matches a real video player's behavior of sizing to the terminal at
     // launch, not live-resizing.
     let (term_cols, term_rows) = terminal_size::terminal_size()
-        .map(|(terminal_size::Width(w), terminal_size::Height(h))| {
-            (w as usize, h as usize)
-        })
+        .map(|(terminal_size::Width(w), terminal_size::Height(h))| (w as usize, h as usize))
         .unwrap_or((animation.width, animation.height));
     let left_pad = " ".repeat(term_cols.saturating_sub(animation.width) / 2);
     let top_pad = "\n".repeat(term_rows.saturating_sub(animation.height) / 2);
@@ -579,7 +575,10 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
                 Some(sink)
             }
             Err(e) => {
-                eprintln!("warning: failed to play audio sidecar '{}': {e}", wav_path.display());
+                eprintln!(
+                    "warning: failed to play audio sidecar '{}': {e}",
+                    wav_path.display()
+                );
                 None
             }
         }
