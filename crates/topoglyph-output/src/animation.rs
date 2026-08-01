@@ -76,6 +76,10 @@ pub enum TglyphError {
     NoFrames,
     #[error("frame {0}: expected {1}x{2}, got {3}x{4}")]
     FrameSizeMismatch(usize, usize, usize, usize, usize),
+    #[error("unexpected end of binary data while reading {0}")]
+    UnexpectedEof(&'static str),
+    #[error("malformed binary .tglyph data: {0}")]
+    MalformedBinary(&'static str),
 }
 
 impl TglyphAnimation {
@@ -295,6 +299,37 @@ impl TglyphAnimation {
             include_color,
             frames,
         })
+    }
+    /// Serializes the animation to the compact binary v2 `.tglyph` layout
+    /// (see `crate::binary`'s module docs). This is what `topoglyph video`
+    /// writes by default as of 0.2.2 — measured ~23% the size of the
+    /// equivalent [`to_text`] output on real animation content, at the
+    /// cost of no longer being line-oriented human-readable text.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        crate::binary::encode(self)
+    }
+
+    /// Parses either format `.tglyph` document back into an animation:
+    /// the compact binary v2 layout (detected via its magic bytes, see
+    /// `crate::binary::is_binary`) or, for backward compatibility, the
+    /// original human-readable text v1 format via [`decode`]. Callers
+    /// that already know they have UTF-8 text should prefer calling
+    /// [`decode`] directly; this is for the common "I have some bytes
+    /// read from a `.tglyph` file and don't know which format" case (the
+    /// CLI's `play` subcommand, for example).
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, TglyphError> {
+        if crate::binary::is_binary(bytes) {
+            crate::binary::decode(bytes)
+        } else {
+            let text = std::str::from_utf8(bytes).map_err(|_| {
+                TglyphError::MalformedHeader(
+                    "magic",
+                    "TGLYPHB2 or TOPOGLYPH-ANIM v1",
+                    "<invalid UTF-8, and not v2 binary magic>".to_string(),
+                )
+            })?;
+            Self::decode(text)
+        }
     }
 }
 

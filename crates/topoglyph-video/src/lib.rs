@@ -20,6 +20,8 @@ use topoglyph_core::geometry::GridOptions;
 use topoglyph_core::matching::{MatchOptions, MatchWeights};
 use topoglyph_core::{clipping, matching};
 use topoglyph_output::animation::{TglyphAnimation, TglyphError};
+
+pub mod audio;
 use topoglyph_vectomancy::adapter::{self, SmoothingOptions};
 
 #[derive(Debug, thiserror::Error)]

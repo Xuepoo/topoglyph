@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-01
+
+### Added
+- **Audio support for `topoglyph video`/`topoglyph play`**: `topoglyph video` now decodes the source video's audio track (via `ffmpeg-next`'s safe decoder + resampler API) into a sidecar `<output>.tglyph.wav` file next to the `.tglyph` animation (any standard-conformant player can open the WAV directly; `.tglyph` itself stays audio-free, since it's a small purpose-built text-cell format, not a general media container). `topoglyph play` automatically detects and plays a matching `<input>.wav` sidecar through the default output device (via `rodio`) in sync with the frame loop; pass `--no-audio` to opt out. Silent sources (GIFs, muted recordings) simply produce no sidecar rather than an error.
+- **Compact binary `.tglyph` v2 format (`topoglyph_output::binary`)**: Real animation content analysis (a full `bad-apple.mp4` conversion, 6572 frames at 120x45) found that v1 text delta lines (`<row>,<col>,<token>`) spend ~90% of their bytes on decimal row/col digits and comma separators, with actual token data only ~10% — and only 19 distinct tokens ever appear across the whole animation despite the 5400-cell grid. v2 exploits both: every distinct token gets a small dictionary index (varint-encoded) instead of repeating its UTF-8 bytes, and changed-cell positions are a zigzag-varint *delta from the previous changed cell's flat index* within the frame instead of two decimal numbers. Measured on that same animation: **21.0MB -> 4.9MB (23% of the original size)**, byte-for-byte identical decoded content verified against the v1 text output. `topoglyph video` now writes this format by default; pass `--text-format` to opt back into the original human-readable v1 text `.tglyph` (e.g. for inspecting with `cat`/a text editor). `topoglyph play` and `TglyphAnimation::from_bytes` auto-detect either format via magic bytes, so existing v1 `.tglyph` files keep working unmodified.
+
+### Fixed
+- **`topoglyph play` rendered pinned to the terminal's top-left corner instead of centered**, and pinned the web renderer's output the same way regardless of the panel's actual size (including fullscreen). `play` now computes horizontal/vertical padding from the current terminal size (via `terminal_size`) once at launch and centers the fixed WIDTH x HEIGHT grid within it; the web renderer's `.editor-content` is now a centering flex container instead of top-left-anchored padding, fixing both the normal and fullscreen view.
+- **The web renderer's `<cols>x<rows> · <ms>ms` dimension readout (`#output-meta`) never became visible after rendering.** `app.js` set its `textContent` but never cleared the `display:none` the element started with, and the element itself had no CSS at all (so even when visible it rendered as unstyled inline text instead of a fixed readout). Fixed both: `app.js` now clears `display:none` after populating it, and it's now pinned to the bottom-left corner of the editor panel via CSS.
+
 ## [0.2.1] - 2026-08-01
 
 ### Fixed

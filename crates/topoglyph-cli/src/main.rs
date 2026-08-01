@@ -237,6 +237,14 @@ struct VideoArgs {
     /// this to leave headroom for other work while converting.
     #[arg(short = 'j', long)]
     threads: Option<usize>,
+
+    /// Write the original human-readable text `.tglyph` v1 format instead
+    /// of the default compact binary v2 format (0.2.2). The text format is
+    /// larger (delta lines spend most of their bytes on decimal row/col
+    /// coordinates) but can be inspected with `cat`/a text editor; use
+    /// this if you need that over the ~4x smaller binary output.
+    #[arg(long, default_value_t = false)]
+    text_format: bool,
 }
 
 #[derive(ClapArgs, Debug, Clone)]
@@ -252,6 +260,11 @@ struct PlayArgs {
     /// (equivalent to `render`'s `--no-color`).
     #[arg(long, default_value_t = false)]
     no_color: bool,
+
+    /// Disable audio playback even if a sidecar `<input>.wav` exists
+    /// (written by `topoglyph video`).
+    #[arg(long, default_value_t = false)]
+    no_audio: bool,
 }
 
 fn resolve_frequency_bias(glyph_mode: &str) -> Result<f32, String> {
@@ -463,15 +476,41 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
     )
     .map_err(|e| format!("Failed to convert video: {e}"))?;
 
-    let text = animation.to_text();
-    std::fs::write(&args.output, &text)
+    let (bytes, byte_len) = if args.text_format {
+        let text = animation.to_text();
+        let len = text.len();
+        (text.into_bytes(), len)
+    } else {
+        let bytes = animation.to_bytes();
+        let len = bytes.len();
+        (bytes, len)
+    };
+    std::fs::write(&args.output, &bytes)
         .map_err(|e| format!("Failed to write '{}': {e}", args.output))?;
 
+    // Extract the source video's audio track (if any) into a sidecar
+    // `<output>.wav` next to the `.tglyph` file, so `topoglyph play` has
+    // something to play back in sync with the frames (0.2.2: 视频转换的
+    // 时候应该带有音频). Silent inputs (GIFs, muted recordings) simply
+    // produce no sidecar rather than an error.
+    let output_path = std::path::Path::new(&args.output);
+    let wav_path = topoglyph::video::audio::sidecar_wav_path(output_path);
+    let wrote_audio = topoglyph::video::audio::extract_audio_to_wav(
+        std::path::Path::new(&args.input),
+        &wav_path,
+    )
+    .map_err(|e| format!("Failed to extract audio: {e}"))?;
+
     Ok(format!(
-        "Wrote {} frames ({} bytes) to {}",
+        "Wrote {} frames ({} bytes) to {}{}",
         animation.frames.len(),
-        text.len(),
-        args.output
+        byte_len,
+        args.output,
+        if wrote_audio {
+            format!(", audio to {}", wav_path.display())
+        } else {
+            String::new()
+        }
     ))
 }
 
@@ -480,11 +519,18 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
 /// (`\x1b[H`) and overwrites it in place rather than scrolling, so playback
 /// doesn't produce a wall of stacked frames (`topoglyph-docs/TODO.md` 0.5.0:
 /// "使用 ANSI `\x1b[H` 游标复位实现终端内极高帧率的无闪烁动画播放").
+///
+/// The animation is centered in the terminal (both horizontally and
+/// vertically) rather than pinned to the top-left corner, and if a sidecar
+/// `<input>.wav` exists (written by `topoglyph video`, see
+/// `topoglyph_video::audio`) it's played back through the default audio
+/// device in sync with the frame loop (0.2.2: 播放的时候应该带有音频播放，
+/// 视频应该居中播放).
 fn run_play(args: PlayArgs) -> Result<(), String> {
-    let text = std::fs::read_to_string(&args.input)
+    let bytes = std::fs::read(&args.input)
         .map_err(|e| format!("Failed to read '{}': {e}", args.input))?;
-    let animation =
-        TglyphAnimation::decode(&text).map_err(|e| format!("Failed to parse animation: {e}"))?;
+    let animation = TglyphAnimation::from_bytes(&bytes)
+        .map_err(|e| format!("Failed to parse animation: {e}"))?;
 
     if animation.frames.is_empty() {
         return Ok(());
@@ -496,11 +542,56 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
         Duration::from_secs_f32(1.0 / 24.0)
     };
 
+    // Left/top padding that centers the fixed WIDTH x HEIGHT grid within
+    // whatever the terminal's current size is. Recomputed once up front
+    // (not per-frame): resizing mid-playback would misalign the `\x1b[H`
+    // cursor-reset trick's assumption of a stable frame origin, so this
+    // matches a real video player's behavior of sizing to the terminal at
+    // launch, not live-resizing.
+    let (term_cols, term_rows) = terminal_size::terminal_size()
+        .map(|(terminal_size::Width(w), terminal_size::Height(h))| {
+            (w as usize, h as usize)
+        })
+        .unwrap_or((animation.width, animation.height));
+    let left_pad = " ".repeat(term_cols.saturating_sub(animation.width) / 2);
+    let top_pad = "\n".repeat(term_rows.saturating_sub(animation.height) / 2);
+
+    // If `topoglyph video` wrote a sidecar `<input>.wav` alongside this
+    // `.tglyph` file, load and play it through the default output device
+    // for the duration of playback. Missing sidecar or no audio device
+    // available are both silently treated as "play video only" rather
+    // than hard errors, since audio is an enhancement, not the point of
+    // `play`.
+    let wav_path = topoglyph::video::audio::sidecar_wav_path(std::path::Path::new(&args.input));
+    let _audio_sink = if !args.no_audio && wav_path.is_file() {
+        match std::fs::File::open(&wav_path)
+            .map_err(|e| e.to_string())
+            .and_then(|f| {
+                rodio::Decoder::new_wav(std::io::BufReader::new(f)).map_err(|e| e.to_string())
+            })
+            .and_then(|source| {
+                rodio::DeviceSinkBuilder::open_default_sink()
+                    .map_err(|e| e.to_string())
+                    .map(|sink| (sink, source))
+            }) {
+            Ok((sink, source)) => {
+                sink.mixer().add(source);
+                Some(sink)
+            }
+            Err(e) => {
+                eprintln!("warning: failed to play audio sidecar '{}': {e}", wav_path.display());
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut stdout = std::io::stdout();
     // Clear the screen once up front; subsequent frames only reposition the
     // cursor rather than clearing again, which is what avoids visible
     // flicker at high frame rates.
-    let _ = write!(stdout, "\x1b[2J\x1b[H");
+    let _ = write!(stdout, "\x1b[2J\x1b[H{top_pad}");
 
     loop {
         for canvas in &animation.frames {
@@ -513,8 +604,16 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
             }
             .map_err(|e| format!("Failed to encode frame: {e}"))?;
 
-            let _ = write!(stdout, "\x1b[H");
-            let _ = stdout.write_all(&encoded);
+            // Reset to the top of the padded frame area (below top_pad,
+            // which was written once and never overwritten) and re-indent
+            // every row with left_pad so the grid stays horizontally
+            // centered too.
+            let cursor_row = 1 + top_pad.matches('\n').count();
+            let _ = write!(stdout, "\x1b[{cursor_row};1H");
+            let encoded_text = String::from_utf8_lossy(&encoded);
+            for line in encoded_text.lines() {
+                let _ = writeln!(stdout, "{left_pad}{line}");
+            }
             let _ = stdout.flush();
 
             let elapsed = frame_start.elapsed();
