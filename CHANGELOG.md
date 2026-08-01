@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-08-01
+
+### Changed
+- **Bounded-memory video conversion:** `topoglyph video` now streams decoded frames through a bounded render pipeline and writes frame deltas directly to the `.tglyph` output. It retains only in-flight frames and the previous rendered canvas instead of every decoded image and full `TextCanvas`; `--threads` now controls a local render pool and rejects zero.
+- **Compact M4A audio sidecars:** AAC source audio is remuxed without re-encoding; other codecs are transcoded to 128 kbit/s AAC. New conversions write `<output>.tglyph.m4a` instead of uncompressed PCM WAV, while `topoglyph play` retains read-only compatibility with existing `.tglyph.wav` sidecars.
+- **User-facing CLI help:** Removed internal Rust type names and development-document references from `--help` output, and documented `-j, --threads` directly.
+
 ## [0.2.2] - 2026-08-01
 
 ### Added

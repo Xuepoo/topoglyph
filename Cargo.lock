@@ -2840,10 +2840,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5773a4c030a19d9bfaa090f49746ff35c75dfddfa700df7a5939d5e076a57039"
 dependencies = [
  "lazy_static",
+ "symphonia-codec-aac",
  "symphonia-codec-pcm",
  "symphonia-core",
+ "symphonia-format-isomp4",
  "symphonia-format-riff",
  "symphonia-metadata",
+]
+
+[[package]]
+name = "symphonia-codec-aac"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c263845aa86881416849c1729a54c7f55164f8b96111dba59de46849e73a790"
+dependencies = [
+ "lazy_static",
+ "log",
+ "symphonia-core",
 ]
 
 [[package]]
@@ -2870,6 +2883,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "symphonia-format-isomp4"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "243739585d11f81daf8dac8d9f3d18cc7898f6c09a259675fc364b382c30e0a5"
+dependencies = [
+ "encoding_rs",
+ "log",
+ "symphonia-core",
+ "symphonia-metadata",
+ "symphonia-utils-xiph",
+]
+
+[[package]]
 name = "symphonia-format-riff"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2891,6 +2917,16 @@ dependencies = [
  "lazy_static",
  "log",
  "symphonia-core",
+]
+
+[[package]]
+name = "symphonia-utils-xiph"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee27c85ab799a338446b68eec77abf42e1a6f1bb490656e121c6e27bfbab9f16"
+dependencies = [
+ "symphonia-core",
+ "symphonia-metadata",
 ]
 
 [[package]]
@@ -3118,7 +3154,7 @@ checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "topoglyph"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "topoglyph-atlas",
  "topoglyph-core",
@@ -3129,7 +3165,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-atlas"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "rusttype",
  "topoglyph-core",
@@ -3139,7 +3175,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-cli"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "clap",
  "rayon",
@@ -3151,7 +3187,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "bitflags 2.13.1",
  "rayon",
@@ -3162,7 +3198,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-output"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -3172,7 +3208,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-vectomancy"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "serde_json",
  "topoglyph-core",
@@ -3183,7 +3219,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-video"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "ffmpeg-next",
  "hound",
