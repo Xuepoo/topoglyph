@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-08-01
+
+### Fixed
+- **`topoglyph play` scheduled each frame's delay relative to that frame's own start**, so `std::thread::sleep`'s inherent overshoot (OS scheduler granularity, typically a few milliseconds) compounded linearly across every frame instead of being corrected -- a long animation's video track would drift progressively later than any audio sidecar (which stays exact via the OS audio clock) the longer playback ran, even with a correct recorded `fps`. Each pass now schedules frame *N*'s deadline as `pass_start + N * frame_duration`, so a late frame's overshoot no longer pushes every subsequent frame later by the same amount. Verified against a 6572-frame, 30fps `bad-apple.mp4` conversion: wall-clock playback time is 219.15s against an expected `6572/30 = 219.07s` and the audio sidecar's 219.15s (previously this class of drift, on top of 0.3.2's fps fix, could still leave video and audio audibly out of sync by the end of a long clip).
+
 ## [0.3.2] - 2026-08-01
 
 ### Fixed
