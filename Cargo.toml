@@ -54,7 +54,7 @@ video = ["dep:topoglyph-video"]
 # This is the exact gap that let `vectomancy-video`/`vectomancy-text` drift
 # to a stale `7.0.0` while the rest of that workspace moved to `7.1.2`; see
 # `vectomancy/AGENTS.md`'s "Known Architecture Debt" section.
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 authors = ["Xuepoo"]
 license = "MIT"
@@ -66,12 +66,12 @@ repository = "https://github.com/Xuepoo/topoglyph"
 # dependency is a bare path with no version — crates.io has no path to
 # resolve against, only a version range. Keep this version in sync with
 # `workspace.package.version` above on every release.
-topoglyph = { path = ".", version = "0.3.3" }
-topoglyph-core = { path = "crates/topoglyph-core", version = "0.3.3" }
-topoglyph-atlas = { path = "crates/topoglyph-atlas", version = "0.3.3" }
-topoglyph-output = { path = "crates/topoglyph-output", version = "0.3.3" }
-topoglyph-vectomancy = { path = "crates/topoglyph-vectomancy", version = "0.3.3" }
-topoglyph-video = { path = "crates/topoglyph-video", version = "0.3.3" }
+topoglyph = { path = ".", version = "0.3.4" }
+topoglyph-core = { path = "crates/topoglyph-core", version = "0.3.4" }
+topoglyph-atlas = { path = "crates/topoglyph-atlas", version = "0.3.4" }
+topoglyph-output = { path = "crates/topoglyph-output", version = "0.3.4" }
+topoglyph-vectomancy = { path = "crates/topoglyph-vectomancy", version = "0.3.4" }
+topoglyph-video = { path = "crates/topoglyph-video", version = "0.3.4" }
 
 # Pinned to the published crates.io releases (not `path = "../vectomancy/..."`).
 # Cargo treats a `path` entry as authoritative and never falls back to the
