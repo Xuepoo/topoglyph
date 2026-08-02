@@ -636,12 +636,25 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
         let mut frames =
             PlaybackFrames::new(&bytes).map_err(|e| format!("Failed to parse animation: {e}"))?;
 
+        // Anchor every frame's target time to this pass's start instead of
+        // sleeping `frame_duration` relative to each frame's own start.
+        // `std::thread::sleep` reliably overshoots its requested duration
+        // (OS scheduler granularity), and a per-frame-relative sleep lets
+        // that overshoot compound: each frame's clock restarts fresh after
+        // the previous sleep returns, so an average overshoot of even a
+        // few milliseconds accumulates linearly across thousands of frames
+        // (e.g. ~5-10ms/frame x 6572 frames = 30-65s) while any audio
+        // sidecar keeps exact time via the OS's own audio clock. Anchoring
+        // to `pass_start + index * frame_duration` makes a late frame's
+        // deadline immediately catch back up on the next frame instead of
+        // pushing every subsequent frame later by the same amount.
+        let pass_start = Instant::now();
+        let mut frame_index: u64 = 0;
+
         while let Some(canvas) = frames
             .next_frame()
             .map_err(|e| format!("Failed to parse animation: {e}"))?
         {
-            let frame_start = Instant::now();
-
             let encoded = if args.no_color {
                 PlainTextEncoder::new().encode(&canvas)
             } else {
@@ -661,9 +674,11 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
             }
             let _ = stdout.flush();
 
-            let elapsed = frame_start.elapsed();
-            if elapsed < frame_duration {
-                std::thread::sleep(frame_duration - elapsed);
+            frame_index += 1;
+            let target = frame_duration * frame_index as u32;
+            let elapsed = pass_start.elapsed();
+            if elapsed < target {
+                std::thread::sleep(target - elapsed);
             }
         }
         if !args.r#loop {
