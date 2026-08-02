@@ -192,9 +192,11 @@ struct VideoArgs {
     /// Output frame rate recorded in the `.tglyph` header. This is purely
     /// timing metadata for playback; every decoded video frame becomes one
     /// output frame regardless of this value (no resampling/frame
-    /// dropping).
-    #[arg(long, default_value_t = 24.0)]
-    fps: f32,
+    /// dropping). Omit to use the source video's own average frame rate
+    /// (falls back to 24 if that can't be probed); recording a rate that
+    /// doesn't match the source desyncs playback from any audio sidecar.
+    #[arg(long)]
+    fps: Option<f32>,
 
     /// Sample and record path colors. Disabled by default for smaller output.
     #[arg(long, default_value_t = false)]
@@ -439,6 +441,16 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
     } else {
         topoglyph::output::stream::AnimationFormat::Binary
     };
+    // Default to the source's own average frame rate rather than an
+    // arbitrary constant: the encoder records every decoded frame with no
+    // resampling, so a recorded `.tglyph` fps that doesn't match the
+    // source's actual rate makes `topoglyph play` drift out of sync with
+    // any audio sidecar (audio duration is fixed; video "duration" is
+    // frame_count / fps).
+    let fps = args.fps.unwrap_or_else(|| {
+        topoglyph::video::probe_frame_rate(std::path::Path::new(&args.input)).unwrap_or(24.0)
+    });
+
     let output_file = std::fs::File::create(&args.output)
         .map_err(|e| format!("Failed to create '{}': {e}", args.output))?;
 
@@ -463,7 +475,7 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
         &atlas,
         &options,
         topoglyph::video::VideoOutputOptions {
-            fps: args.fps,
+            fps,
             include_color: args.color,
             threads,
             format,
@@ -505,8 +517,14 @@ fn run_video(args: VideoArgs) -> Result<String, String> {
     };
 
     Ok(format!(
-        "Wrote {} frames ({} bytes, {}x{}) to {}{}",
-        summary.frame_count, byte_len, summary.width, summary.height, args.output, audio_message
+        "Wrote {} frames at {}fps ({} bytes, {}x{}) to {}{}",
+        summary.frame_count,
+        fps,
+        byte_len,
+        summary.width,
+        summary.height,
+        args.output,
+        audio_message
     ))
 }
 
