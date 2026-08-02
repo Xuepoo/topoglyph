@@ -594,7 +594,19 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
     } else {
         None
     };
-    let _audio_sink = if !args.no_audio {
+    // Use `rodio::Player` (not a bare `Decoder` added straight to the
+    // mixer) so we can query `Player::get_pos()`: the actual decoded
+    // playback position the audio thread is at, sampled every 5ms. Video
+    // frame pacing below is driven off this when audio is present, rather
+    // than a software `Instant`-based clock -- a wall clock can only ever
+    // approximate the audio device's real clock (resampling, buffer
+    // underruns/overruns, and device clock rate itself all drift relative
+    // to `Instant`, in either direction, and no amount of software-clock
+    // tuning removes that: the two clocks are physically different).
+    // Syncing video to the actual audio position instead is what every
+    // real video player does and eliminates this whole class of bug.
+    let _audio_stream_handle;
+    let audio_player = if !args.no_audio {
         if let Some(audio_path) = audio_path {
             match std::fs::File::open(&audio_path)
                 .map_err(|e| e.to_string())
@@ -602,24 +614,29 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
                 .and_then(|source| {
                     rodio::DeviceSinkBuilder::open_default_sink()
                         .map_err(|e| e.to_string())
-                        .map(|sink| (sink, source))
+                        .map(|handle| (handle, source))
                 }) {
-                Ok((sink, source)) => {
-                    sink.mixer().add(source);
-                    Some(sink)
+                Ok((handle, source)) => {
+                    let player = rodio::Player::connect_new(handle.mixer());
+                    player.append(source);
+                    _audio_stream_handle = Some(handle);
+                    Some(player)
                 }
                 Err(e) => {
                     eprintln!(
                         "warning: failed to play audio sidecar '{}': {e}",
                         audio_path.display()
                     );
+                    _audio_stream_handle = None;
                     None
                 }
             }
         } else {
+            _audio_stream_handle = None;
             None
         }
     } else {
+        _audio_stream_handle = None;
         None
     };
 
@@ -636,18 +653,18 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
         let mut frames =
             PlaybackFrames::new(&bytes).map_err(|e| format!("Failed to parse animation: {e}"))?;
 
-        // Anchor every frame's target time to this pass's start instead of
-        // sleeping `frame_duration` relative to each frame's own start.
-        // `std::thread::sleep` reliably overshoots its requested duration
-        // (OS scheduler granularity), and a per-frame-relative sleep lets
-        // that overshoot compound: each frame's clock restarts fresh after
-        // the previous sleep returns, so an average overshoot of even a
-        // few milliseconds accumulates linearly across thousands of frames
-        // (e.g. ~5-10ms/frame x 6572 frames = 30-65s) while any audio
-        // sidecar keeps exact time via the OS's own audio clock. Anchoring
-        // to `pass_start + index * frame_duration` makes a late frame's
-        // deadline immediately catch back up on the next frame instead of
-        // pushing every subsequent frame later by the same amount.
+        // Pace frames against the actual audio playback position
+        // (`Player::get_pos()`) when a sidecar is playing, instead of a
+        // software `Instant`-based clock. A wall clock only ever
+        // approximates the audio device's real clock -- resampling,
+        // buffer underruns/overruns, and the device's own clock rate all
+        // drift `Instant` relative to actual audio playback, in either
+        // direction, and that drift is invisible to (and uncorrectable
+        // by) a purely software-timed loop. Syncing to the real audio
+        // position is what every real video player does and eliminates
+        // this whole class of bug rather than chasing another symptom of
+        // it. Falls back to a wall-clock anchor (`pass_start + index *
+        // frame_duration`) when there's no audio to sync to.
         let pass_start = Instant::now();
         let mut frame_index: u64 = 0;
 
@@ -676,7 +693,10 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
 
             frame_index += 1;
             let target = frame_duration * frame_index as u32;
-            let elapsed = pass_start.elapsed();
+            let elapsed = match &audio_player {
+                Some(player) => player.get_pos(),
+                None => pass_start.elapsed(),
+            };
             if elapsed < target {
                 std::thread::sleep(target - elapsed);
             }

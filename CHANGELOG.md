@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-08-01
+
+### Changed
+- **`topoglyph play` now paces video frames against the actual audio playback position instead of a software wall clock, when an audio sidecar is playing.** 0.3.2 and 0.3.3 fixed the recorded `fps` and a compounding software-sleep drift respectively, but a purely `Instant`-based pacer can only ever approximate the real audio device's clock -- resampling, buffer underrun/overrun, and the audio device's own clock rate all drift a software clock relative to actual audio playback (in either direction), and no amount of wall-clock-side tuning removes that gap, since the two clocks are physically different. `topoglyph play` now uses `rodio::Player` (rather than adding the decoder straight to the mixer) so it can read `Player::get_pos()` -- the audio thread's own tracked decode position, sampled every 5ms -- and schedules each video frame against that instead of `Instant::now()` whenever audio is present. Falls back to the previous absolute wall-clock anchor when `--no-audio` is passed or no sidecar exists. This is the same audio-master-clock approach real video players use, and removes the whole class of clock-drift bug rather than fixing another symptom of it.
+
 ## [0.3.3] - 2026-08-01
 
 ### Fixed
