@@ -263,6 +263,33 @@ pub fn probe_frame_count(path: &std::path::Path) -> Option<u64> {
     None
 }
 
+/// Probes the video's actual average frame rate (frames per second),
+/// without decoding any frames. Used to default `topoglyph video --fps` to
+/// the source's real rate instead of an arbitrary constant: the encoder
+/// records every decoded frame with no resampling/frame-dropping (see
+/// [`FrameRenderOptions`]'s docs), so recording a `.tglyph` header `fps`
+/// that doesn't match the source's actual rate makes `topoglyph play`
+/// desync from any audio sidecar -- e.g. a 30fps, 6572-frame source
+/// recorded with the old hardcoded `24.0` default plays back in
+/// `6572/24 ≈ 273.8s` instead of the source's actual `≈219.1s`, drifting
+/// increasingly out of sync with the audio track as playback progresses.
+/// Returns `None` if the rate can't be determined or the video can't be
+/// opened -- callers should fall back to a fixed default in that case.
+pub fn probe_frame_rate(path: &std::path::Path) -> Option<f32> {
+    let ictx = ffmpeg_next::format::input(path).ok()?;
+    let stream = ictx.streams().best(ffmpeg_next::media::Type::Video)?;
+
+    let avg_rate = stream.avg_frame_rate();
+    if avg_rate.denominator() > 0 && avg_rate.numerator() > 0 {
+        let fps = avg_rate.numerator() as f32 / avg_rate.denominator() as f32;
+        if fps.is_finite() && fps > 0.0 {
+            return Some(fps);
+        }
+    }
+
+    None
+}
+
 /// Converts a video directly into a seekable `.tglyph` writer without ever
 /// materializing the whole video or animation in memory.
 ///
@@ -472,5 +499,21 @@ mod tests {
         let text = anim.to_text();
         let decoded = TglyphAnimation::decode(&text).unwrap();
         assert_eq!(decoded.frames.len(), 3);
+    }
+
+    #[test]
+    fn probe_frame_rate_returns_none_for_nonexistent_path() {
+        assert_eq!(
+            probe_frame_rate(std::path::Path::new("/nonexistent/does-not-exist.mp4")),
+            None
+        );
+    }
+
+    #[test]
+    fn probe_frame_count_returns_none_for_nonexistent_path() {
+        assert_eq!(
+            probe_frame_count(std::path::Path::new("/nonexistent/does-not-exist.mp4")),
+            None
+        );
     }
 }

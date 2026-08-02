@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-08-01
+
+### Fixed
+- **`topoglyph video --fps` defaulted to a hardcoded `24.0` regardless of the source's actual frame rate.** Since the encoder records every decoded frame verbatim with no resampling/frame-dropping, a recorded `fps` that doesn't match the source desyncs `topoglyph play` from any audio sidecar over the length of the clip -- e.g. a 30fps, 6572-frame source (219.1s actual/audio duration) played back at the old 24fps default in `6572/24 ≈ 273.8s`, drifting the video track roughly 55s longer than the audio by the end. `--fps` is now optional and defaults to the source's own average frame rate (probed via the new `topoglyph_video::probe_frame_rate`, without decoding any frames), falling back to `24.0` only when that can't be determined. Re-encoding an affected `.tglyph` file with this version fixes existing desync.
+
 ## [0.3.1] - 2026-08-01
 
 ### Fixed

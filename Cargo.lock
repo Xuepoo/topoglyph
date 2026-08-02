@@ -3198,7 +3198,7 @@ checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "topoglyph"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "topoglyph-atlas",
  "topoglyph-core",
@@ -3209,7 +3209,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-atlas"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "rusttype",
  "topoglyph-core",
@@ -3219,7 +3219,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-cli"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "clap",
  "indicatif",
@@ -3232,7 +3232,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bitflags 2.13.1",
  "rayon",
@@ -3243,7 +3243,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-output"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -3253,7 +3253,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-vectomancy"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "serde_json",
  "topoglyph-core",
@@ -3264,7 +3264,7 @@ dependencies = [
 
 [[package]]
 name = "topoglyph-video"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ffmpeg-next",
  "hound",
