@@ -1,4 +1,4 @@
-use clap::{Args as ClapArgs, Parser, Subcommand};
+use clap::{Args as ClapArgs, CommandFactory, Parser, Subcommand};
 use std::io::Write;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
@@ -16,8 +16,12 @@ use topoglyph::video::FrameRenderOptions;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
+    /// Generate shell completion script for the given shell and print to stdout.
+    #[arg(long, value_name = "SHELL")]
+    generate_completions: Option<clap_complete::Shell>,
+
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -796,6 +800,7 @@ const KNOWN_FIRST_ARGS: &[&str] = &[
     "--help",
     "-V",
     "--version",
+    "--generate-completions",
 ];
 
 /// Rewrites `argv` so a bare `topoglyph-cli <image.png> ...` invocation
@@ -820,7 +825,21 @@ fn main() -> ExitCode {
     let argv = with_inferred_subcommand(std::env::args().collect());
     let cli = Cli::parse_from(argv);
 
-    match cli.command {
+    if let Some(shell) = cli.generate_completions {
+        let mut cmd = Cli::command();
+        clap_complete::generate(shell, &mut cmd, "topoglyph", &mut std::io::stdout());
+        return ExitCode::SUCCESS;
+    }
+
+    let command = match cli.command {
+        Some(c) => c,
+        None => {
+            eprintln!("error: a subcommand is required. Run `topoglyph --help` for usage.");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match command {
         // `play` streams frames directly to stdout as it plays, rather than
         // building one big `Vec<u8>` result like the other subcommands
         // below, so it's handled as its own arm instead of going through
