@@ -9,6 +9,7 @@ WORKDIR /usr/src/app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     clang \
+    libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency manifests and the workspace
