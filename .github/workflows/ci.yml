@@ -21,10 +21,10 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Install LLVM/Clang & FFmpeg Headers
+      - name: Install LLVM/Clang
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libavfilter-dev pkg-config libasound2-dev
+          sudo apt-get install -y clang pkg-config
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -33,10 +33,19 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Lint with Clippy
-        run: cargo clippy -- -D warnings
+        # Exclude topoglyph-video: vectomancy-video 7.1.3 (crates.io) pins
+        # ffmpeg-next 8.1 (libavutil.so.60); Ubuntu noble ships FFmpeg 6.1.
+        # Re-enable once vectomancy-video 7.1.4 (ffmpeg-next 9) publishes.
+        run: |
+          cargo clippy --workspace --exclude topoglyph-video --exclude topoglyph-cli -- -D warnings
+          cargo clippy -p topoglyph-cli --no-default-features -- -D warnings
 
       - name: Build
-        run: cargo build --verbose
+        run: |
+          cargo build --workspace --exclude topoglyph-video --exclude topoglyph-cli --verbose
+          cargo build -p topoglyph-cli --no-default-features --verbose
 
       - name: Run tests
-        run: cargo test --verbose
+        run: |
+          cargo test --workspace --exclude topoglyph-video --exclude topoglyph-cli --verbose
+          cargo test -p topoglyph-cli --no-default-features --verbose

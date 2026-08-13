@@ -588,14 +588,24 @@ fn run_play(args: PlayArgs) -> Result<(), String> {
 
     // Prefer the compact M4A sidecar written by current versions, while
     // retaining read-only support for legacy `.tglyph.wav` pairs.
+    // Sidecar paths come from topoglyph::video::audio, which is only
+    // available when the "video" feature is enabled.
     let input_path = std::path::Path::new(&args.input);
-    let m4a_path = topoglyph::video::audio::sidecar_audio_path(input_path);
-    let wav_path = topoglyph::video::audio::sidecar_wav_path(input_path);
-    let audio_path = if m4a_path.is_file() {
-        Some(m4a_path)
-    } else if wav_path.is_file() {
-        Some(wav_path)
-    } else {
+    #[cfg(feature = "video")]
+    let audio_path = {
+        let m4a_path = topoglyph::video::audio::sidecar_audio_path(input_path);
+        let wav_path = topoglyph::video::audio::sidecar_wav_path(input_path);
+        if m4a_path.is_file() {
+            Some(m4a_path)
+        } else if wav_path.is_file() {
+            Some(wav_path)
+        } else {
+            None
+        }
+    };
+    #[cfg(not(feature = "video"))]
+    let audio_path: Option<std::path::PathBuf> = {
+        let _ = input_path;
         None
     };
     // Use `rodio::Player` (not a bare `Decoder` added straight to the

@@ -16,7 +16,5 @@ topoglyph-core = { workspace = true }
 topoglyph-atlas = { workspace = true }
 topoglyph-vectomancy = { workspace = true }
 topoglyph-output = { workspace = true }
-ffmpeg-next = "9.0"
-
 [dev-dependencies]
 hound = "3.5"
