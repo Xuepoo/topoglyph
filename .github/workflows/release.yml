@@ -53,11 +53,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install LLVM/Clang (Linux)
+      - name: Install LLVM/Clang & ALSA (Linux)
         if: matrix.os_name == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang pkg-config
+          sudo apt-get install -y clang pkg-config libasound2-dev
 
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }} --bin topoglyph --no-default-features
