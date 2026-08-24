@@ -366,6 +366,20 @@ name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc0e56a716f1e132ff6bf4bdac1c944a3fcdc1cae65f70a4a2a1ac3b401d2d1f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
 
 [[package]]
 name = "byteorder-lite"
@@ -846,6 +860,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "euclid"
+version = "0.22.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1a05365e3b1c6d1650318537c7460c6923f1abdd272ad6842baa2b509957a06"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -945,6 +968,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
 
 [[package]]
+name = "font-types"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e64eb721ca85a34323425f4041adc5d82704d3782d5f8f03793bc012419dce23"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "fontconfig-parser"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -965,6 +997,19 @@ dependencies = [
  "slotmap",
  "tinyvec",
  "ttf-parser 0.20.0",
+]
+
+[[package]]
+name = "fontdb"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2660c5e9157bf76d2db1294e4a9feba604ef610819a3b591088d0d8392a3290f"
+dependencies = [
+ "fontconfig-parser",
+ "log",
+ "memmap2",
+ "slotmap",
+ "tinyvec",
 ]
 
 [[package]]
@@ -1204,6 +1249,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "harfrust"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c03d949a14aa089bbb282f7dd76a498a7f684428e4257202efc119ec010376f9"
+dependencies = [
+ "bitflags 2.13.1",
+ "bytemuck",
+ "read-fonts",
+ "smallvec",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1352,6 +1409,12 @@ name = "imagesize"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "029d73f573d8e8d63e6d5020011d3255b28c3ba85d6cf870a07184ed23de9284"
+
+[[package]]
+name = "imagesize"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
 name = "imgref"
@@ -1518,12 +1581,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "kiddo"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99523b54976700ec2674b8b74a8cb2ff32277682cf97545c61338dccdf115865"
+dependencies = [
+ "aligned-vec",
+ "array-init",
+ "az",
+ "cmov",
+ "fixed",
+ "generator",
+ "nonmax",
+ "num-traits",
+ "rayon",
+ "sorted-vec",
+ "tracing",
+ "yep-cache-line-size",
+]
+
+[[package]]
 name = "kurbo"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd85a5776cd9500c2e2059c8c76c3b01528566b7fcbaf8098b55a33fc298849b"
 dependencies = [
  "arrayvec",
+]
+
+[[package]]
+name = "kurbo"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b60dfc32f652b926df6192e55525b16d186c69d47876c3ead4da5cc9f8450e2"
+dependencies = [
+ "arrayvec",
+ "euclid",
+ "polycool",
+ "smallvec",
 ]
 
 [[package]]
@@ -1780,6 +1875,12 @@ checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "nonmax"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "610a5acd306ec67f907abe5567859a3c693fb9886eb1f012ab8f2a47bef3db51"
 
 [[package]]
 name = "noop_proc_macro"
@@ -2201,6 +2302,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "polycool"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50596ddc09eb5ad5f75cacd40209568e66df71baf86e1499a0e99c4cff12a5a6"
+dependencies = [
+ "arrayvec",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2493,6 +2603,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "read-fonts"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "046a7d674daf459825b32f5062056d6882db0d2f5a479fbd76ccfc870ac18709"
+dependencies = [
+ "bytemuck",
+ "font-types",
+ "once_cell",
+]
+
+[[package]]
 name = "reborrow"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2568,6 +2689,15 @@ name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "rustc-hash"
@@ -2806,6 +2936,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
+name = "skrifa"
+version = "0.44.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "819ab7d62b1d3e72d9d9dea5650bac30424f9111364bb94928dbf5ecad1baa68"
+dependencies = [
+ "bytemuck",
+ "read-fonts",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2875,8 +3015,18 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e44e288cd960318917cbd540340968b90becc8bc81f171345d706e7a89d9d70"
 dependencies = [
- "kurbo",
+ "kurbo 0.9.5",
  "siphasher 0.3.11",
+]
+
+[[package]]
+name = "svgtypes"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "695b5790b3131dafa99b3bbfd25a216edb3d216dad9ca208d4657bfb8f2abc3d"
+dependencies = [
+ "kurbo 0.13.1",
+ "siphasher 1.0.3",
 ]
 
 [[package]]
@@ -3133,6 +3283,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tiny-skia-path"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edca365c3faccca67d06593c5980fa6c57687de727a03131735bb85f01fdeeb9"
+dependencies = [
+ "arrayref",
+ "bytemuck",
+ "strict-num",
+]
+
+[[package]]
 name = "tinyvec"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3241,7 +3402,7 @@ dependencies = [
  "rayon",
  "serde",
  "smallvec",
- "vectomancy-geometry",
+ "vectomancy-geometry 7.1.3",
 ]
 
 [[package]]
@@ -3260,9 +3421,9 @@ version = "0.3.5"
 dependencies = [
  "serde_json",
  "topoglyph-core",
- "vectomancy-geometry",
+ "vectomancy-geometry 7.1.3",
  "vectomancy-raster",
- "vectomancy-svg",
+ "vectomancy-svg 8.1.0",
 ]
 
 [[package]]
@@ -3459,6 +3620,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "usvg"
+version = "0.48.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "977d0a4abdef933f424a99fe09f95576e089b90aebc6f016a3bc813762493e91"
+dependencies = [
+ "base64 0.23.0",
+ "data-url",
+ "flate2",
+ "fontdb 0.24.0",
+ "harfrust",
+ "imagesize 0.15.0",
+ "kurbo 0.13.1",
+ "log",
+ "pico-args",
+ "roxmltree 0.21.1",
+ "simplecss",
+ "siphasher 1.0.3",
+ "skrifa",
+ "strict-num",
+ "svgtypes 0.16.1",
+ "tiny-skia-path 0.12.0",
+ "unicode-bidi",
+ "unicode-script",
+ "unicode-vo",
+ "xmlwriter",
+]
+
+[[package]]
 name = "usvg-parser"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3466,13 +3655,13 @@ checksum = "351a05e6f2023d6b4e946f734240a3927aefdcf930d7d42587a2c8a8869814b0"
 dependencies = [
  "data-url",
  "flate2",
- "imagesize",
- "kurbo",
+ "imagesize 0.12.0",
+ "kurbo 0.9.5",
  "log",
  "roxmltree 0.19.0",
  "simplecss",
  "siphasher 0.3.11",
- "svgtypes",
+ "svgtypes 0.13.0",
  "usvg-tree",
 ]
 
@@ -3482,8 +3671,8 @@ version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c41888b9d5cf431fe852eaf9d047bbde83251b98f1749c2f08b1071e6db46e2"
 dependencies = [
- "fontdb",
- "kurbo",
+ "fontdb 0.16.2",
+ "kurbo 0.9.5",
  "log",
  "rustybuzz",
  "unicode-bidi",
@@ -3499,8 +3688,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18863e0404ed153d6e56362c5b1146db9f4f262a3244e3cf2dbe7d8a85909f05"
 dependencies = [
  "strict-num",
- "svgtypes",
- "tiny-skia-path",
+ "svgtypes 0.13.0",
+ "tiny-skia-path 0.11.4",
 ]
 
 [[package]]
@@ -3543,7 +3732,7 @@ dependencies = [
  "flate2",
  "image",
  "imageproc",
- "kiddo",
+ "kiddo 5.3.3",
  "log",
  "rayon",
  "rustfft",
@@ -3553,13 +3742,13 @@ dependencies = [
  "thiserror 1.0.69",
  "toml",
  "tracing",
- "usvg",
+ "usvg 0.38.0",
  "vectomancy-export",
- "vectomancy-geometry",
+ "vectomancy-geometry 7.1.3",
  "vectomancy-pipeline",
  "vectomancy-raster",
- "vectomancy-svg",
- "vectomancy-transform",
+ "vectomancy-svg 7.1.3",
+ "vectomancy-transform 7.1.3",
  "zip",
 ]
 
@@ -3574,8 +3763,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tera 2.1.0",
- "vectomancy-geometry",
- "vectomancy-transform",
+ "vectomancy-geometry 7.1.3",
+ "vectomancy-transform 7.1.3",
 ]
 
 [[package]]
@@ -3583,6 +3772,15 @@ name = "vectomancy-geometry"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e017417fe1d850b462c2aa1392ce5956696ad6e185c2dabdcbaf5faa737879ce"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "vectomancy-geometry"
+version = "8.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4b42f76f2e1f502a89c9d7ab5e4d3c1af5d5f7dc14620a8776e434950a22a34"
 dependencies = [
  "serde",
 ]
@@ -3596,10 +3794,10 @@ dependencies = [
  "serde",
  "tracing",
  "vectomancy-export",
- "vectomancy-geometry",
+ "vectomancy-geometry 7.1.3",
  "vectomancy-raster",
- "vectomancy-svg",
- "vectomancy-transform",
+ "vectomancy-svg 7.1.3",
+ "vectomancy-transform 7.1.3",
 ]
 
 [[package]]
@@ -3613,7 +3811,7 @@ dependencies = [
  "rayon",
  "serde",
  "tracing",
- "vectomancy-geometry",
+ "vectomancy-geometry 7.1.3",
 ]
 
 [[package]]
@@ -3623,9 +3821,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38cc44ff57fe08464628f1d4ca8c36367449ca6174b986a31970b9b776913ab3"
 dependencies = [
  "serde",
- "usvg",
- "vectomancy-geometry",
- "vectomancy-transform",
+ "usvg 0.38.0",
+ "vectomancy-geometry 7.1.3",
+ "vectomancy-transform 7.1.3",
+]
+
+[[package]]
+name = "vectomancy-svg"
+version = "8.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cd6ed9aeef47ad00ece8da38401c43efae57f4167ba5d38b54bf1cd3ffbb42f"
+dependencies = [
+ "serde",
+ "usvg 0.48.1",
+ "vectomancy-geometry 8.1.0",
+ "vectomancy-transform 8.1.0",
 ]
 
 [[package]]
@@ -3634,11 +3844,24 @@ version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f721ffe797af13780babd1073ab0910934926c37a789733fe7e4bb881c5967c4"
 dependencies = [
- "kiddo",
+ "kiddo 5.3.3",
  "rustfft",
  "serde",
  "tracing",
- "vectomancy-geometry",
+ "vectomancy-geometry 7.1.3",
+]
+
+[[package]]
+name = "vectomancy-transform"
+version = "8.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e88f20a99228ae376a7082cfc5969e96f875839ae84811e3daf92973e6a8e379"
+dependencies = [
+ "kiddo 6.1.0",
+ "rustfft",
+ "serde",
+ "tracing",
+ "vectomancy-geometry 8.1.0",
 ]
 
 [[package]]
@@ -4062,6 +4285,16 @@ name = "y4m"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5a4b21e1a62b67a2970e6831bc091d7b87e119e7f9791aef9702e3bef04448"
+
+[[package]]
+name = "yep-cache-line-size"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59dea97e5518f64cbb9468f2cd1ac59c9d0186eeb5ee6198d4bb8adfa1465499"
+dependencies = [
+ "libc",
+ "raw-cpuid",
+]
 
 [[package]]
 name = "zerocopy"
