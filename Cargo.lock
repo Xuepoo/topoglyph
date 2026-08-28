@@ -3422,7 +3422,7 @@ dependencies = [
  "serde_json",
  "topoglyph-core",
  "vectomancy-geometry 7.1.3",
- "vectomancy-raster",
+ "vectomancy-raster 8.1.0",
  "vectomancy-svg 8.1.0",
 ]
 
@@ -3746,7 +3746,7 @@ dependencies = [
  "vectomancy-export",
  "vectomancy-geometry 7.1.3",
  "vectomancy-pipeline",
- "vectomancy-raster",
+ "vectomancy-raster 7.1.3",
  "vectomancy-svg 7.1.3",
  "vectomancy-transform 7.1.3",
  "zip",
@@ -3795,7 +3795,7 @@ dependencies = [
  "tracing",
  "vectomancy-export",
  "vectomancy-geometry 7.1.3",
- "vectomancy-raster",
+ "vectomancy-raster 7.1.3",
  "vectomancy-svg 7.1.3",
  "vectomancy-transform 7.1.3",
 ]
@@ -3812,6 +3812,20 @@ dependencies = [
  "serde",
  "tracing",
  "vectomancy-geometry 7.1.3",
+]
+
+[[package]]
+name = "vectomancy-raster"
+version = "8.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b391070475d177ca5897b9b2d27ab94707461d063643fc6144a31fb85694f274"
+dependencies = [
+ "image",
+ "imageproc",
+ "rayon",
+ "serde",
+ "tracing",
+ "vectomancy-geometry 8.1.0",
 ]
 
 [[package]]

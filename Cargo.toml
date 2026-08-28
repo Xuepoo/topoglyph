@@ -88,7 +88,7 @@ topoglyph-video = { path = "crates/topoglyph-video", version = "0.3.5" }
 # temporary (uncommitted) `[patch.crates-io]` block rather than reintroducing
 # a path dependency here.
 vectomancy-geometry = "7.1.2"
-vectomancy-raster = "7.1.2"
+vectomancy-raster = "8.1.0"
 vectomancy-svg = "8.1.0"
 # Native-only: ffmpeg-next can't target wasm32, so video support (topoglyph-video)
 # is intentionally kept out of the wasm-facing crate graph (topoglyph-core/
