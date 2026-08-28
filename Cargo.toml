@@ -87,7 +87,7 @@ topoglyph-video = { path = "crates/topoglyph-video", version = "0.3.5" }
 # If you need to test against unreleased local `vectomancy` changes, use a
 # temporary (uncommitted) `[patch.crates-io]` block rather than reintroducing
 # a path dependency here.
-vectomancy-geometry = "7.1.2"
+vectomancy-geometry = "8.1.0"
 vectomancy-raster = "7.1.2"
 vectomancy-svg = "8.1.0"
 # Native-only: ffmpeg-next can't target wasm32, so video support (topoglyph-video)
