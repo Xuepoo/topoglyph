@@ -11,7 +11,7 @@ TopoGlyph is a high-performance mathematical engine within the Vectomancy ecosys
 - **Geometric Topology Mapping**: Transcends simple brightness-based ASCII conversion by utilizing subpixel extraction, 16×32 Bit Masks, and a 6-factor scoring system (mask, topology, orientation, density, centroid, curvature) to find structurally accurate characters.
 - **Top-K & Neighbor Relaxation**: Refines matches over multiple rounds of neighbor relaxation to ensure local topological continuity and high-fidelity text reconstruction.
 - **Custom Glyph Atlas**: Ships with a built-in 17-glyph Unicode line-drawing set (full-length lines, rounded corners, T-junctions, and half-length stubs) and supports true TrueType/OpenType font rasterization. This enables custom character pools, including CJK ideographs and Emojis, complete with correct `cell_width` metadata based on East Asian Width data.
-- **Multi-format Output & Animation**: Renders outputs as Plain Text, ANSI Truecolor, HTML, Debug SVG, or JSON Debug formats. It also introduces `.tglyph`, a highly compressible frame-differential text animation format for videos.
+- **Multi-format Output & Animation**: Renders outputs as Plain Text, ANSI Truecolor, HTML, Debug SVG, or JSON Debug formats. It also introduces `.tglyph` — binary `TGLYPHB3` (v3) by default (unsigned gap, adaptive Full/Sparse, global color palette) with backward compat for `TGLYPHB2` (v2) and `TOPOGLYPH-ANIM v1` text (`--text-format` for v1).
 
 ## Installation
 
@@ -71,7 +71,7 @@ topoglyph atlas inspect [OPTIONS]
 
 ### 3. Video Subcommand
 
-Convert a video file to a `.tglyph` text animation. Colors are off by default (`--color` to opt in). Video frames use the same resolution-aware Auto grid as still images when `--width` and `--height` are omitted. The `.tglyph` format is a plain-text, frame-differential sequence that compresses extremely well with generic tools like `gzip`:
+Convert a video file to a `.tglyph` animation (binary `TGLYPHB3` v3 by default — unsigned gap, adaptive Full/Sparse, global color palette; `TGLYPHB2` v2 and `TOPOGLYPH-ANIM v1` text remain auto-detected, `--text-format` for v1 text). Colors are off by default (`--color` to opt in). Video frames use the same resolution-aware Auto grid as still images when `--width` and `--height` are omitted. The `.tglyph` frame-differential layout compresses extremely well with generic tools like `gzip`:
 
 ```bash
 topoglyph video <input.mp4> -o <output.tglyph> [OPTIONS]
@@ -104,7 +104,7 @@ The project utilizes a multi-crate Workspace structure, divided into:
 - `topoglyph-core`: Defines the fundamental 16×32 `CellMask`, 8-port `PortMask`, the Top-K + Neighbor Relaxation glyph matcher, and subgrid clipping algorithms based on Liang-Barsky exact segment clipping.
 - `topoglyph-atlas`: Manages the glyph library, ships with a built-in 17-glyph Unicode line-drawing set, and handles font rasterization.
 - `topoglyph-vectomancy`: The adapter layer bridging `vectomancy-geometry` and `vectomancy-raster` for data sourcing, applying RDP simplification and Chaikin smoothing.
-- `topoglyph-output`: The renderer, exporting Plain Text, ANSI Truecolor, HTML, Debug SVG, JSON Debug, and the `.tglyph` text animation format.
+- `topoglyph-output`: The renderer, exporting Plain Text, ANSI Truecolor, HTML, Debug SVG, JSON Debug, and the `.tglyph` animation format (binary `TGLYPHB3` v3 default, `TGLYPHB2` v2 + `TOPOGLYPH-ANIM v1` text backward compat).
 - `topoglyph-video`: Converts video files to `.tglyph` animations via FFmpeg.
 - `topoglyph-cli`: The command-line interface entry point.
 

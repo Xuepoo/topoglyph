@@ -11,7 +11,7 @@ TopoGlyph 是 Vectomancy 生态下的一款高性能数学引擎。它并非传�
 - **几何拓扑映射**：超越基于亮度的简单 ASCII 转换。通过子像素提取、16×32 Bit Mask 和 6 因子评分系统（掩码、拓扑、方向、密度、质心、曲率）来精确寻找结构最匹配的字符。
 - **Top-K 与邻接松弛**：在多轮邻接松弛（Neighbor Relaxation）中优化匹配结果，确保局部的拓扑连续性，实现高保真文本重建。
 - **自定义字体图集 (Glyph Atlas)**：内置 17 种 Unicode 线条字形（全长线、圆角、T 字交叉、半长线段），同时支持真实的 TrueType/OpenType 字体栅格化。你可以自由构建自定义字符池（包括中日韩汉字与 Emoji），系统会通过东亚宽度数据自动处理双宽字符的 `cell_width` 元数据。
-- **多格式输出与动画**：支持纯文本、ANSI 真彩色、HTML、Debug SVG 以及 JSON Debug 格式导出。同时引入了高度可压缩的 `.tglyph` 帧差分文本动画格式，用于视频转换。
+- **多格式输出与动画**：支持纯文本、ANSI 真彩色、HTML、Debug SVG 以及 JSON Debug 格式导出。同时引入了 `.tglyph` 动画格式——默认二进制 `TGLYPHB3`（v3，unsigned gap、自适应 Full/Sparse、全局调色板），向后兼容 `TGLYPHB2`（v2）与 `TOPOGLYPH-ANIM v1` 文本（`--text-format` 输出 v1 文本）。
 
 ## 安装方式
 
@@ -71,7 +71,7 @@ topoglyph atlas inspect [OPTIONS]
 
 ### 3. 视频处理子命令 (video)
 
-把视频文件转换为 `.tglyph` 文本动画。颜色默认关闭（需显式传入 `--color` 开启）。省略 `--width` 和 `--height` 时，视频帧使用与静态图片相同的分辨率自适应网格。`.tglyph` 是一种纯文本的帧差分序列（第一帧全量，后续帧只记录变化的格子），因此在外层叠加 `gzip` 等通用压缩效果极佳：
+把视频文件转换为 `.tglyph` 动画（默认二进制 `TGLYPHB3` v3 —— unsigned gap + 自适应 Full/Sparse + 全局调色板；`TGLYPHB2` v2 与 `TOPOGLYPH-ANIM v1` 文本仍自动识别，`--text-format` 输出 v1 文本）。颜色默认关闭（需显式传入 `--color` 开启）。省略 `--width` 和 `--height` 时，视频帧使用与静态图片相同的分辨率自适应网格。`.tglyph` 帧差分布局在外层叠加 `gzip` 等通用压缩效果极佳：
 
 ```bash
 topoglyph video <input.mp4> -o <output.tglyph> [OPTIONS]
@@ -104,7 +104,7 @@ topoglyph play <animation.tglyph> [--loop] [--no-color]
 - `topoglyph-core`：定义底层的 16×32 `CellMask`，8 端口 `PortMask`，基于 Top-K 候选池 + 邻接松弛的字形匹配器，以及基于 Liang-Barsky 精确线段裁剪的子网格切割算法。
 - `topoglyph-atlas`：管理字形库，内置 17 种 Unicode 线条字形，并处理字体栅格化逻辑。
 - `topoglyph-vectomancy`：适配层，桥接 `vectomancy-geometry` 和 `vectomancy-raster` 作为数据源，网格切割前执行 RDP 简化和 Chaikin 平滑处理。
-- `topoglyph-output`：渲染器，导出纯文本、ANSI 真彩色、HTML、Debug SVG、JSON Debug 编码器，以及 `.tglyph` 帧差分文本动画格式。
+- `topoglyph-output`：渲染器，导出纯文本、ANSI 真彩色、HTML、Debug SVG、JSON Debug 编码器，以及 `.tglyph` 动画格式（默认二进制 `TGLYPHB3` v3，向后兼容 `TGLYPHB2` v2 + `TOPOGLYPH-ANIM v1` 文本）。
 - `topoglyph-video`：通过 FFmpeg 把视频文件转换为 `.tglyph` 文本动画。
 - `topoglyph-cli`：命令行程序入口。
 
