@@ -94,7 +94,7 @@ vectomancy-svg = "8.1.0"
 # is intentionally kept out of the wasm-facing crate graph (topoglyph-core/
 # -atlas/-output/-vectomancy), matching how vectomancy-video is isolated from
 # vectomancy-web/wasm-engine.
-vectomancy-video = "7.0.0"
+vectomancy-video = "8.1.0"
 
 smallvec = "1.11"
 serde = { version = "1.0", features = ["derive"] }
