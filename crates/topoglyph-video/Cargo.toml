@@ -9,6 +9,7 @@ description = "Video/frame-sequence to TopoGlyph animation format (.tglyph) conv
 
 [dependencies]
 vectomancy-video = { workspace = true }
+ffmpeg-next = "9.0"
 image = { version = "0.25", features = ["webp"] }
 rayon = { workspace = true }
 thiserror = "2.0"
