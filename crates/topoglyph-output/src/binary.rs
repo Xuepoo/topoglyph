@@ -79,11 +79,17 @@
 //!       dict_index: varint
 //!       [only if include_color] color_ref: varint (0=None, 1..palette_len => palette[ref-1], palette_len+1 => raw 3 bytes RGB fallback)
 //!   frame i>0:
-//!     frame_type: u8 (0 = SparseDelta, 1 = Full; 2 = BitmapDelta reserved)
+//!     frame_type: u8 (0 = SparseDelta, 1 = Full, 2 = BitmapDelta)
 //!     if SparseDelta:
 //!       change_count: varint
 //!       for each change (sorted ascending):
 //!         gap:        varint (unsigned, gap = flat_index - prev_index - 1, prev starts at -1 so first gap == flat_index)
+//!         dict_index: varint
+//!         [only if include_color] color_ref: varint (same as above)
+//!     if BitmapDelta:
+//!       bitset_len: varint (= ceil(cell_count/8))
+//!       bitset:     [bitset_len] bytes, row-major LSB bit0=cell0 (byte idx/8, bit idx%8)
+//!       for each set bit in ascending cell order:
 //!         dict_index: varint
 //!         [only if include_color] color_ref: varint (same as above)
 //!     if Full:
@@ -92,11 +98,21 @@
 //!         [only if include_color] color_ref: varint
 //! ```
 //!
-//! Adaptive choice per frame i>0: SparseDelta vs Full is picked by
-//! comparing `change_count * 2 > cell_count` (≈50% density). When >50% of
-//! cells change, a full frame (cell_count varints) is smaller than
-//! sparse (change_count * (gap+token) ~2B per change). BitmapDelta (bitset)
-//! is reserved for future use.
+//! Adaptive choice per frame i>0: Sparse vs Bitmap vs Full.
+//! - Full if `changed * 2 > cell_count` (>50% density, full grid cheaper
+//!   than any delta).
+//! - Else Bitmap if `changed > cell_count/8` (>12.5% density) and
+//!   `sparse_estimate > bitmap_estimate`, where
+//!   `sparse_estimate = changed * (gap+token[+color])` (~2B w/o color,
+//!   ~3B with palette) and
+//!   `bitmap_estimate = ceil(cell_count/8) + changed * (token[+color])`
+//!   (~1B w/o color, ~2B with). Heuristic in code:
+//!   `changed > cell_count/8 && changed*2 > bitset_bytes + changed` (and
+//!   equivalently `changed*3 > bitset_bytes + changed*2` with color, which
+//!   collapses to the same `changed > bitset_bytes` threshold). This
+//!   captures the mid-density 12.5–50% window where a dense bitset is
+//!   cheaper than sparse gaps but still cheaper than a full frame.
+//! - Else Sparse.
 
 use std::collections::HashMap;
 
@@ -377,9 +393,11 @@ pub fn encode(anim: &TglyphAnimation) -> Vec<u8> {
                 .map(|(idx, _)| idx)
                 .collect();
 
-            // Adaptive: if more than ~50% of cells changed, writing a full
-            // frame is cheaper than sparse (gap+token per change ~2B vs
-            // token per cell ~1B). Use Full when changed*2 > cell_count.
+            // Adaptive 3-way: Full vs Bitmap vs Sparse.
+            // Full if changed*2 > cell_count (>50% density).
+            // Else Bitmap if changed > cell_count/8 and sparse_estimate > bitmap_estimate
+            // (mid-density 12.5–50%), Else Sparse.
+            // Estimates: sparse ~ gap(1)+token(1)[+color(1)], bitmap ~ bitset+token[+color].
             let use_full = changed.len() * 2 > cell_count;
 
             if use_full {
@@ -389,20 +407,47 @@ pub fn encode(anim: &TglyphAnimation) -> Vec<u8> {
                     write_cell_color_v3_inline(&mut out, cell);
                 }
             } else {
-                out.push(FRAME_TYPE_SPARSE);
-                write_varint(&mut out, changed.len() as u64);
-                let mut prev_idx: i64 = -1;
-                for idx in changed {
-                    // Unsigned gap: gap = idx - prev - 1, first gap == idx
-                    let gap = idx as i64 - prev_idx - 1;
-                    debug_assert!(gap >= 0);
-                    write_varint(&mut out, gap as u64);
-                    prev_idx = idx as i64;
-                    write_varint(
-                        &mut out,
-                        dict_index[canvas.cells[idx].token.as_str()] as u64,
-                    );
-                    write_cell_color_v3_inline(&mut out, &canvas.cells[idx]);
+                let bitset_bytes = cell_count.div_ceil(8);
+                // Deterministic chooser mirroring spec: gap+token vs bitset+token
+                // With palette, both sides gain +1 per change for color varint,
+                // so inequality collapses to same changed > bitset_bytes check.
+                let per_change_sparse = if anim.include_color { 3 } else { 2 };
+                let per_change_bitmap = if anim.include_color { 2 } else { 1 };
+                let sparse_est = changed.len() * per_change_sparse;
+                let bitmap_est = bitset_bytes + changed.len() * per_change_bitmap;
+                let use_bitmap = changed.len() > cell_count / 8 && sparse_est > bitmap_est;
+
+                if use_bitmap {
+                    out.push(FRAME_TYPE_BITMAP);
+                    write_varint(&mut out, bitset_bytes as u64);
+                    let mut bitset = vec![0u8; bitset_bytes];
+                    for &idx in &changed {
+                        bitset[idx / 8] |= 1 << (idx % 8);
+                    }
+                    out.extend_from_slice(&bitset);
+                    for idx in changed {
+                        write_varint(
+                            &mut out,
+                            dict_index[canvas.cells[idx].token.as_str()] as u64,
+                        );
+                        write_cell_color_v3_inline(&mut out, &canvas.cells[idx]);
+                    }
+                } else {
+                    out.push(FRAME_TYPE_SPARSE);
+                    write_varint(&mut out, changed.len() as u64);
+                    let mut prev_idx: i64 = -1;
+                    for idx in changed {
+                        // Unsigned gap: gap = idx - prev - 1, first gap == idx
+                        let gap = idx as i64 - prev_idx - 1;
+                        debug_assert!(gap >= 0);
+                        write_varint(&mut out, gap as u64);
+                        prev_idx = idx as i64;
+                        write_varint(
+                            &mut out,
+                            dict_index[canvas.cells[idx].token.as_str()] as u64,
+                        );
+                        write_cell_color_v3_inline(&mut out, &canvas.cells[idx]);
+                    }
                 }
             }
         }
@@ -700,9 +745,42 @@ impl<'a> BinaryFrameReader<'a> {
                     }
                     Ok(canvas)
                 } else if frame_type == FRAME_TYPE_BITMAP {
-                    Err(TglyphError::MalformedBinary(
-                        "BitmapDelta frame type reserved, not yet implemented",
-                    ))
+                    let mut canvas = self
+                        .previous
+                        .clone()
+                        .expect("previous frame is set for every index after the first");
+                    let bitset_len = read_varint(self.bytes, &mut self.pos)? as usize;
+                    let expected_len = cell_count.div_ceil(8);
+                    if bitset_len != expected_len {
+                        return Err(TglyphError::MalformedBinary(
+                            "bitmap bitset length mismatch",
+                        ));
+                    }
+                    let bitset = read_bytes(self.bytes, &mut self.pos, bitset_len)?;
+                    for idx in 0..cell_count {
+                        if (bitset[idx / 8] >> (idx % 8)) & 1 == 1 {
+                            let dict_idx = read_varint(self.bytes, &mut self.pos)? as usize;
+                            let token = self
+                                .dict
+                                .get(dict_idx)
+                                .ok_or(TglyphError::MalformedBinary(
+                                    "dictionary index out of range",
+                                ))?
+                                .clone();
+                            let color = read_cell_color_v3(
+                                self.bytes,
+                                self.include_color,
+                                &self.palette,
+                                &mut self.pos,
+                            )?;
+                            let cell = &mut canvas.cells[idx];
+                            cell.token = token;
+                            if self.include_color {
+                                cell.color = color;
+                            }
+                        }
+                    }
+                    Ok(canvas)
                 } else {
                     Err(TglyphError::MalformedBinary("unknown v3 frame type"))
                 }
@@ -1013,5 +1091,116 @@ mod tests {
         // (at least not larger than old 1+3 scheme inflated)
         // Just check size is reasonable (< 200 bytes for tiny anim)
         assert!(bytes.len() < 200);
+    }
+
+    #[test]
+    fn bitmap_round_trips_mid_density() {
+        // 20×20 = 400 cells, ~60 changes (≈15% density) should pick Bitmap (12.5–50% window)
+        // and round-trip losslessly.
+        let width = 20;
+        let f0 = canvas(&vec!["a"; 400], width, None);
+        let mut f1_tokens = vec!["a"; 400];
+        for idx in (0..400).step_by(7) {
+            f1_tokens[idx] = "b";
+        }
+        // ~58 changes (0,7,14,...,399)
+        let f1 = canvas(&f1_tokens, width, None);
+        let anim = TglyphAnimation::encode(&[f0.clone(), f1.clone()], 24.0, false).unwrap();
+        let bytes = encode(&anim);
+        assert!(bytes.starts_with(b"TGLYPHB3"));
+
+        // Verify adaptive chooser actually emitted BitmapDelta (2) for frame 1.
+        // We locate the second frame's type by walking the header+dict+frame0.
+        let mut pos = 0usize;
+        pos += 8; // magic
+        pos += 4 + 4 + 4 + 1 + 4; // width,height,fps,flags,frame_count
+        let dict_len = read_varint(&bytes, &mut pos).unwrap() as usize;
+        for _ in 0..dict_len {
+            let l = read_varint(&bytes, &mut pos).unwrap() as usize;
+            pos += l;
+        }
+        // No palette (include_color false)
+        // frame 0: type + 400 token varints
+        let _ft0 = read_u8(&bytes, &mut pos).unwrap();
+        for _ in 0..400 {
+            let _ = read_varint(&bytes, &mut pos).unwrap();
+        }
+        let ft1 = read_u8(&bytes, &mut pos).unwrap();
+        assert_eq!(
+            ft1, FRAME_TYPE_BITMAP,
+            "mid-density ~15% should pick BitmapDelta (2), got {ft1}"
+        );
+
+        let decoded = decode(&bytes).unwrap();
+        assert_eq!(decoded.frames.len(), 2);
+        let tokens = |c: &TextCanvas| c.cells.iter().map(|c| c.token.clone()).collect::<Vec<_>>();
+        assert_eq!(tokens(&decoded.frames[0]), tokens(&f0));
+        assert_eq!(tokens(&decoded.frames[1]), tokens(&f1));
+
+        // Also verify streaming path mirrors the same choice and round-trips.
+        let decoded_stream = {
+            let reader = BinaryFrameReader::new(&bytes).unwrap();
+            reader.collect::<Result<Vec<_>, _>>().unwrap()
+        };
+        assert_eq!(decoded_stream, decoded.frames);
+
+        // Bitset size check: 400 cells => 50 bytes, Bitmap frame should be
+        // 1(type)+1(varint len)+50(bitset)+58(tokens) =110 for frame1,
+        // total = header30+401(frame0)+110 =541
+        assert_eq!(bytes.len(), 541);
+    }
+
+    #[test]
+    fn adaptive_chooses_bitmap_over_sparse_when_beneficial() {
+        //Helper to count second frame type for a given density.
+        fn second_frame_type(width: usize, height: usize, changed_indices: &[usize]) -> u8 {
+            let cell_count = width * height;
+            let f0_tokens = vec!["a"; cell_count];
+            let f0 = canvas(&f0_tokens, width, None);
+            let mut f1_tokens = vec!["a"; cell_count];
+            for &idx in changed_indices {
+                f1_tokens[idx] = "b";
+            }
+            let f1 = canvas(&f1_tokens, width, None);
+            let anim = TglyphAnimation::encode(&[f0, f1], 24.0, false).unwrap();
+            let bytes = encode(&anim);
+            let mut pos = 0usize;
+            pos += 8 + 4 + 4 + 4 + 1 + 4;
+            let dict_len = read_varint(&bytes, &mut pos).unwrap() as usize;
+            for _ in 0..dict_len {
+                let l = read_varint(&bytes, &mut pos).unwrap() as usize;
+                pos += l;
+            }
+            let _ft0 = read_u8(&bytes, &mut pos).unwrap();
+            for _ in 0..cell_count {
+                let _ = read_varint(&bytes, &mut pos).unwrap();
+            }
+            read_u8(&bytes, &mut pos).unwrap()
+        }
+
+        let width = 20;
+        let cell_count: usize = 400;
+        let bitset_bytes = cell_count.div_ceil(8); // 50
+                                                   // 20% density = 80 changes => Bitmap should win (80*2=160 > 50+80=130)
+        let changed_20pct: Vec<usize> = (0..cell_count).step_by(5).collect(); // 80
+        assert_eq!(changed_20pct.len(), 80);
+        let ft_20 = second_frame_type(width, 20, &changed_20pct);
+        assert_eq!(
+            ft_20, FRAME_TYPE_BITMAP,
+            "20% density should pick BitmapDelta, got {ft_20}"
+        );
+        // 10% density = 40 changes => Sparse should win (80 < 90)
+        let changed_10pct: Vec<usize> = (0..cell_count).step_by(10).collect(); // 40
+        assert_eq!(changed_10pct.len(), 40);
+        let ft_10 = second_frame_type(width, 20, &changed_10pct);
+        assert_eq!(
+            ft_10, FRAME_TYPE_SPARSE,
+            "10% density should stay Sparse, got {ft_10}"
+        );
+        // Verify estimates explicitly match chooser logic:
+        // 20% case: sparse_est 160 > bitmap_est 130
+        assert!(changed_20pct.len() * 2 > bitset_bytes + changed_20pct.len());
+        // 10% case: sparse_est 80 not > bitmap_est 90
+        assert!(!(changed_10pct.len() * 2 > bitset_bytes + changed_10pct.len()));
     }
 }

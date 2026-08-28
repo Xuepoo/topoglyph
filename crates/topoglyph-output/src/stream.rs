@@ -15,6 +15,7 @@ const BINARY_MAGIC: &[u8; 8] = b"TGLYPHB3";
 const FLAG_COLOR: u8 = 0b0000_0001;
 const FRAME_TYPE_SPARSE: u8 = 0;
 const FRAME_TYPE_FULL: u8 = 1;
+const FRAME_TYPE_BITMAP: u8 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnimationFormat {
@@ -212,20 +213,48 @@ impl<W: Write + Seek> StreamingEncoder<W> {
                     )?;
                 }
             } else {
-                self.writer.write_all(&[FRAME_TYPE_SPARSE])?;
-                write_varint(&mut self.writer, changed.len() as u64)?;
-                let mut prev_idx: i64 = -1;
-                for idx in changed {
-                    let gap = idx as i64 - prev_idx - 1;
-                    debug_assert!(gap >= 0);
-                    write_varint(&mut self.writer, gap as u64)?;
-                    prev_idx = idx as i64;
-                    Self::write_binary_cell(
-                        &mut self.writer,
-                        &self.dictionary_index,
-                        self.include_color,
-                        canvas.cells.get(idx).expect("changed idx in bounds"),
-                    )?;
+                let bitset_bytes = cell_count.div_ceil(8);
+                // Deterministic chooser mirroring binary.rs: same thresholds,
+                // palette fallback (1+3B) still pays per-change color cost on
+                // both sides so the inequality is unchanged.
+                let per_change_sparse = if self.include_color { 3 } else { 2 };
+                let per_change_bitmap = if self.include_color { 2 } else { 1 };
+                let sparse_est = changed.len() * per_change_sparse;
+                let bitmap_est = bitset_bytes + changed.len() * per_change_bitmap;
+                let use_bitmap = changed.len() > cell_count / 8 && sparse_est > bitmap_est;
+
+                if use_bitmap {
+                    self.writer.write_all(&[FRAME_TYPE_BITMAP])?;
+                    write_varint(&mut self.writer, bitset_bytes as u64)?;
+                    let mut bitset = vec![0u8; bitset_bytes];
+                    for &idx in &changed {
+                        bitset[idx / 8] |= 1 << (idx % 8);
+                    }
+                    self.writer.write_all(&bitset)?;
+                    for idx in changed {
+                        Self::write_binary_cell(
+                            &mut self.writer,
+                            &self.dictionary_index,
+                            self.include_color,
+                            canvas.cells.get(idx).expect("changed idx in bounds"),
+                        )?;
+                    }
+                } else {
+                    self.writer.write_all(&[FRAME_TYPE_SPARSE])?;
+                    write_varint(&mut self.writer, changed.len() as u64)?;
+                    let mut prev_idx: i64 = -1;
+                    for idx in changed {
+                        let gap = idx as i64 - prev_idx - 1;
+                        debug_assert!(gap >= 0);
+                        write_varint(&mut self.writer, gap as u64)?;
+                        prev_idx = idx as i64;
+                        Self::write_binary_cell(
+                            &mut self.writer,
+                            &self.dictionary_index,
+                            self.include_color,
+                            canvas.cells.get(idx).expect("changed idx in bounds"),
+                        )?;
+                    }
                 }
             }
         } else {
