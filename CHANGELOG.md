@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-08-28
+
 ### Added
-- **feat(codec): .tglyph binary v3 TGLYPHB3 – unsigned gap, adaptive Full/Sparse, global color palette, v2 backward compat.** `topoglyph_output::binary` now writes `TGLYPHB3` by default: changed-cell gaps are unsigned varints (instead of v2 zigzag, doubling the 1-byte range from 0..63 to 0..127), per-frame adaptive `SparseDelta` vs `Full` at ~50% density (`changed*2 > cell_count`), and a global RGB palette for `include_color` (1-byte palette index vs 1+3 B). `BinaryFrameReader`/`TglyphAnimation::from_bytes` auto-detect `TGLYPHB2` (zigzag, no palette/type) and `TGLYPHB3`; streaming encoder (`stream.rs`) emits `TGLYPHB3` with `palette_len=0` fallback to legacy 1+3 B color until a global pass is feasible. `is_binary` matches either magic.
+- **feat(codec): .tglyph binary v3 TGLYPHB3 – unsigned gap, adaptive Full/Sparse/Bitmap, global color palette, v2 backward compat.** `topoglyph_output::binary` now writes `TGLYPHB3` by default: changed-cell gaps are unsigned varints (instead of v2 zigzag, doubling the 1-byte range from 0..63 to 0..127), per-frame adaptive `SparseDelta` / `BitmapDelta` / `Full` (`BitmapDelta` uses LSB row-major bitset `varint(bitset_len)+bitset bytes` for mid-density ~12-50% when `changed>cell_count/8 && sparse>bitmap`, `Full` at `changed*2>cell_count`), and a global RGB palette for `include_color` (1-byte palette index vs 1+3 B). `BinaryFrameReader`/`TglyphAnimation::from_bytes` auto-detect `TGLYPHB2` (zigzag, no palette/type) and `TGLYPHB3`; streaming encoder (`stream.rs`) emits `TGLYPHB3` with `palette_len=0` fallback to legacy 1+3 B color until a global pass is feasible. `is_binary` matches either magic.
 
 ### Changed
 - **deps: vectomancy-geometry/raster/video 7.1.2/7.0.0 -> 8.1.0 (ffmpeg-next 9.0).** Unified to a single `8.1.0` to avoid duplicate `StyledPath` copies in mixed 7.x/8.x graphs (supersedes dependabot #25/#26). `vectomancy-video 8.1.0` moves `ffmpeg-next 8.1 -> 9.0` (libavutil 61) fixing the FFmpeg 9 link error noted in CTX-0003; `topoglyph-video` now carries an explicit `ffmpeg-next = "9.0"` dep (previously transitive).
