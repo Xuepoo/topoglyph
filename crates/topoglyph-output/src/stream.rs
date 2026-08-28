@@ -11,8 +11,10 @@ use topoglyph_core::canvas::{TextCanvas, TextCell};
 
 use crate::animation::TglyphError;
 
-const BINARY_MAGIC: &[u8; 8] = b"TGLYPHB2";
+const BINARY_MAGIC: &[u8; 8] = b"TGLYPHB3";
 const FLAG_COLOR: u8 = 0b0000_0001;
+const FRAME_TYPE_SPARSE: u8 = 0;
+const FRAME_TYPE_FULL: u8 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnimationFormat {
@@ -153,6 +155,13 @@ impl<W: Write + Seek> StreamingEncoder<W> {
                     write_varint(&mut self.writer, token.len() as u64)?;
                     self.writer.write_all(token.as_bytes())?;
                 }
+                if self.include_color {
+                    // Streaming has no global palette (requires 2-pass over all
+                    // frames). Write palette_len 0 so the v3 decoder falls back
+                    // to the legacy 1+3 byte per-cell color encoding, but we
+                    // still benefit from unsigned gap + adaptive frame types.
+                    write_varint(&mut self.writer, 0)?;
+                }
             }
             AnimationFormat::Text => {
                 writeln!(self.writer, "TOPOGLYPH-ANIM v1")?;
@@ -173,40 +182,55 @@ impl<W: Write + Seek> StreamingEncoder<W> {
     }
 
     fn write_binary_frame(&mut self, canvas: &TextCanvas) -> Result<(), StreamError> {
+        let width = self.width.expect("width set before frame");
+        // height not needed for adaptive calc besides cell_count
+        let cell_count = canvas.width * canvas.height;
+        let _ = width;
         if let Some(previous) = self.previous.as_ref() {
-            let change_count = canvas
+            // Collect changed indices
+            let changed: Vec<usize> = canvas
                 .cells
                 .iter()
                 .zip(&previous.cells)
-                .filter(|(cell, previous_cell)| {
-                    cell.token != previous_cell.token
-                        || (self.include_color && cell.color != previous_cell.color)
+                .enumerate()
+                .filter(|(_, (cell, prev_cell))| {
+                    cell.token != prev_cell.token
+                        || (self.include_color && cell.color != prev_cell.color)
                 })
-                .count();
-            write_varint(&mut self.writer, change_count as u64)?;
+                .map(|(idx, _)| idx)
+                .collect();
 
-            let mut previous_index = -1_i64;
-            for (index, (cell, previous_cell)) in
-                canvas.cells.iter().zip(&previous.cells).enumerate()
-            {
-                if cell.token == previous_cell.token
-                    && (!self.include_color || cell.color == previous_cell.color)
-                {
-                    continue;
+            let use_full = changed.len() * 2 > cell_count;
+            if use_full {
+                self.writer.write_all(&[FRAME_TYPE_FULL])?;
+                for cell in &canvas.cells {
+                    Self::write_binary_cell(
+                        &mut self.writer,
+                        &self.dictionary_index,
+                        self.include_color,
+                        cell,
+                    )?;
                 }
-                write_varint(
-                    &mut self.writer,
-                    zigzag_encode(index as i64 - previous_index),
-                )?;
-                previous_index = index as i64;
-                Self::write_binary_cell(
-                    &mut self.writer,
-                    &self.dictionary_index,
-                    self.include_color,
-                    cell,
-                )?;
+            } else {
+                self.writer.write_all(&[FRAME_TYPE_SPARSE])?;
+                write_varint(&mut self.writer, changed.len() as u64)?;
+                let mut prev_idx: i64 = -1;
+                for idx in changed {
+                    let gap = idx as i64 - prev_idx - 1;
+                    debug_assert!(gap >= 0);
+                    write_varint(&mut self.writer, gap as u64)?;
+                    prev_idx = idx as i64;
+                    Self::write_binary_cell(
+                        &mut self.writer,
+                        &self.dictionary_index,
+                        self.include_color,
+                        canvas.cells.get(idx).expect("changed idx in bounds"),
+                    )?;
+                }
             }
         } else {
+            // Frame 0 is always Full with type prefix
+            self.writer.write_all(&[FRAME_TYPE_FULL])?;
             for cell in &canvas.cells {
                 Self::write_binary_cell(
                     &mut self.writer,
@@ -231,6 +255,7 @@ impl<W: Write + Seek> StreamingEncoder<W> {
             .ok_or_else(|| StreamError::UnknownToken(cell.token.clone()))?;
         write_varint(writer, dictionary_index)?;
         if include_color {
+            // Streaming fallback: palette_len==0 path expects 1+3 encoding.
             match cell.color.as_deref().and_then(parse_hex_color) {
                 Some(rgb) => {
                     writer.write_all(&[1])?;
@@ -306,10 +331,6 @@ fn write_varint(writer: &mut impl Write, mut value: u64) -> io::Result<()> {
         }
         writer.write_all(&[byte | 0x80])?;
     }
-}
-
-fn zigzag_encode(value: i64) -> u64 {
-    ((value << 1) ^ (value >> 63)) as u64
 }
 
 fn parse_hex_color(hex: &str) -> Option<[u8; 3]> {
