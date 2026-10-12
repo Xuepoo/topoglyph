@@ -88,7 +88,7 @@ jobs:
           ./nfpm pkg --packager archlinux --target topoglyph-linux-${PKG_ARCH}.pkg.tar.zst
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ matrix.artifact_name }}
           path: |
