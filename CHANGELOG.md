@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-15
+
+### Added
+- Native static-image `--render-mode rounded` constructs globally connected region boundaries using only spaces and `─│╭╮╰╯`, without a custom font or diagonal glyphs.
+- Native `--render-mode centerline` thresholds and thins foreground ink before the existing smoothing and glyph-matching pipeline, avoiding Sobel's double boundaries around thick strokes.
+- Alpha-aware foreground selection (`auto`, `dark`, `light`, `alpha`), configurable coverage threshold, foreground cropping, output trimming and padding, and optional rounded-mode speck/pinhole cleanup through `--min-region-area`.
+- Synthetic connectivity, transparency, centerline and cleanup tests, plus a real CLI process test checking trimmed output row counts against JSON canvas dimensions.
+
+### Fixed
+- Explicitly trimmed plain-text output no longer appends an extra blank row. Existing default output behavior is preserved.
+- Static render grid allocation limits reject oversized dimensions before constructing the cell grid.
+
+### Notes
+- The default `match` pipeline remains available and unchanged for ordinary existing calls. The new modes apply to static images, not video.
+- Rounded mode preserves thick strokes' two region boundaries; diagonal edges become rounded stair steps, and close details can merge at low resolution. Its color is uniform rather than sampled from the source.
+- Centerline mode still uses the glyph matcher and can produce diagonal/branch glyphs or gaps; it does not promise rounded mode's closed-port connectivity. Isolated one-pixel details are omitted.
+- Region cleanup is opt-in (default `0`) and can remove intentional details as small as the selected grid-cell area.
+
+
 ## [0.3.6] - 2026-08-28
 
 ### Added
