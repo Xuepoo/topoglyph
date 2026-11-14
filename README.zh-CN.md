@@ -111,3 +111,43 @@ topoglyph play <animation.tglyph> [--loop] [--no-color]
 ## 许可证
 
 本项目采用 MIT 许可证。
+## 线稿中心线与连续圆角轮廓
+
+静态 `render` 新增两种显式模式；默认 `--render-mode match` 保留原有转换行为。
+
+```sh
+# 固定使用空格、─│╭╮╰╯，不含斜线，无需字体。
+topoglyph render portrait.png --render-mode rounded -W 160 -H 80 \
+  --threshold 65 --crop --trim --no-color > portrait.txt
+
+# 对前景笔画直接细化，避免 Sobel 将粗线转成双边缘。
+# 后续仍使用原有字形匹配器，可能含斜线及分叉字符。
+topoglyph render portrait.png --render-mode centerline -W 160 -H 80 \
+  --crop --trim --no-color > portrait-centerline.txt
+```
+
+`--foreground auto` 在存在透明像素时使用 Alpha，否则选择白底黑线。可指定
+`dark`（深色前景）、`light`（浅色前景）或 `alpha`。深浅模式均考虑透明度，
+不把全透明像素隐藏的 RGB 当作前景。`--threshold 1..255` 为覆盖度阈值，默认
+128；65 等较低值更能保留缩小后的细线。这些前景参数仅用于新模式。
+
+`--crop` 在缩放前裁掉前景外空白；`--trim` 裁掉输出外围空白字符；
+`--padding N` 自动启用裁边并增加 N 格边距。无 padding 的 `--trim --no-color`
+纯文本同时去除行尾空格。空图裁边后为一个空白单元格。显式宽高是裁边前输出
+尺寸；只指定一个尺寸时按字符宽高 1:2 推算。每轴不超过 4096，总计不超过
+四百万格；新线稿模式的解码输入不超过一千六百万像素。
+
+`rounded` 按区域边界统一构造连接，局部合并含歧义的对角接触，避免逐格匹配
+产生碎角、断口与多余分叉。保留粗笔画的两侧轮廓，并非单根中心线。斜边会呈
+圆角阶梯，低分辨率下相邻笔画可能合并。该模式不接受字符集和字体选项，颜色
+统一为 `#CBDCEB`（`--invert` 可反色），而非逐点采样原图颜色。
+
+`centerline` 对前景直接二值化、Zhang–Suen 细化、追踪路径，再进入原有平滑及
+字形匹配流程。适合单色线稿；实心形状会收缩为骨架而不是外轮廓。单个孤立像素
+在路径追踪时略去。不保证圆角模式的闭合连接和无斜线特性。
+
+两种模式支持现有 text、html、debug-svg、json 输出；目前仅适用于静态图片。
+
+圆角模式可增加 `--min-region-area 3`：在处理对角连接前，移除不足三格的前景
+小块、填补不足三格的封闭背景小孔。默认 `0` 保留所有区域；外部背景不会填充。
+单位是缩放后的覆盖网格格数，不是原图像素；可能同时移除相同大小的刻意细节。
