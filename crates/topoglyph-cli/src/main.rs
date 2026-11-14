@@ -981,6 +981,11 @@ fn main() -> ExitCode {
             }
         },
         other => {
+            // Encoders already terminate canvas rows. Preserve legacy stdout
+            // for existing calls, but do not append an extra blank row when
+            // the caller explicitly requests trimmed plain text.
+            let trimmed_plain_text = matches!(&other, Command::Render(args)
+                if args.no_color && args.output_format == "text" && (args.trim || args.padding > 0));
             let result = match other {
                 Command::Render(args) => run_render(*args),
                 Command::Atlas(args) => run_atlas(args),
@@ -992,7 +997,11 @@ fn main() -> ExitCode {
             match result {
                 Ok(bytes) => match String::from_utf8(bytes) {
                     Ok(text) => {
-                        println!("{}", text);
+                        if trimmed_plain_text {
+                            print!("{text}");
+                        } else {
+                            println!("{text}");
+                        }
                         ExitCode::SUCCESS
                     }
                     Err(e) => {
