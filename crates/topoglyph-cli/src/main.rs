@@ -7,6 +7,7 @@ use topoglyph::core::clipping;
 use topoglyph::core::geometry::GridOptions;
 use topoglyph::core::matching::{self, MatchOptions, MatchWeights};
 use topoglyph::input::adapter::{self, SmoothingOptions};
+use topoglyph::input::line_art::{self, Foreground, LineArtOptions};
 use topoglyph::output::encoder::{
     AnsiEncoder, DebugSvgEncoder, HtmlEncoder, JsonDebugEncoder, PlainTextEncoder, TextEncoder,
 };
@@ -27,7 +28,7 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Render an image to text art.
-    Render(RenderArgs),
+    Render(Box<RenderArgs>),
     /// Inspect a glyph atlas and print its glyph features as JSON.
     Atlas(AtlasArgs),
     /// Convert a video into a compact `.tglyph` text animation.
@@ -76,6 +77,37 @@ struct RenderArgs {
     /// provided, the other is derived from the source and cell aspect ratios.
     #[arg(short = 'H', long)]
     height: Option<usize>,
+
+    /// Rendering pipeline: match (legacy), rounded (closed region boundaries),
+    /// or centerline (foreground skeleton fed to the existing glyph matcher).
+    #[arg(long, default_value = "match", value_parser = ["match", "rounded", "centerline"])]
+    render_mode: String,
+
+    /// Foreground for rounded/centerline: auto uses alpha if transparent,
+    /// otherwise dark ink. Explicit dark/light respect alpha coverage.
+    #[arg(long, default_value = "auto", value_parser = ["auto", "dark", "light", "alpha"])]
+    foreground: String,
+
+    /// Foreground coverage threshold for rounded/centerline (1..255).
+    #[arg(long, default_value_t = 128, value_parser = clap::value_parser!(u8).range(1..=255))]
+    threshold: u8,
+
+    /// Remove rounded-mode foreground specks and enclosed holes smaller than
+    /// this many grid coverage cells. Zero preserves all regions.
+    #[arg(long, default_value_t = 0)]
+    min_region_area: usize,
+
+    /// Crop the foreground before sizing (rounded/centerline only).
+    #[arg(long)]
+    crop: bool,
+
+    /// Trim unused output cells and trailing text spaces.
+    #[arg(long)]
+    trim: bool,
+
+    /// Uniform output padding in cells; implies --trim.
+    #[arg(long, default_value_t = 0)]
+    padding: usize,
 
     /// Charset to use: 'lines', 'ascii', 'blocks', 'braille', 'custom'
     #[arg(short = 'C', long, default_value = "lines")]
@@ -305,53 +337,113 @@ fn run_render(args: RenderArgs) -> Result<Vec<u8>, String> {
     let bytes =
         std::fs::read(&args.input).map_err(|e| format!("Failed to read '{}': {e}", args.input))?;
 
-    // 2. Decode to a smoothed PolylineScene: skeleton extraction (Zhang-Suen,
-    // via vectomancy-raster) followed by RDP simplification + Chaikin
-    // smoothing so pixel-grid jitter doesn't fragment the subcell mask.
-    let smoothing = SmoothingOptions {
-        tolerance: args.tolerance,
-        chaikin_iters: args.chaikin_iters,
-    };
-    let mut scene = adapter::raster_to_smoothed_scene(&bytes, true, &smoothing)
-        .map_err(|e| format!("Failed to decode image: {e}"))?;
-
-    if args.invert {
-        scene = adapter::invert_scene_colors(&scene);
+    if args.width == Some(0) || args.height == Some(0) {
+        return Err("grid dimensions must be positive".into());
     }
-
-    // 3. Setup Subcell grid clipping (Liang-Barsky segment clipping)
-    let grid_opts = GridOptions {
-        columns: args.width,
-        rows: args.height,
-        ..Default::default()
+    if args.padding > 1024 {
+        return Err("padding must be at most 1024 cells".into());
+    }
+    if args.crop && args.render_mode == "match" {
+        return Err("--crop requires --render-mode rounded or centerline".into());
+    }
+    if args.min_region_area > 0 && args.render_mode != "rounded" {
+        return Err("--min-region-area requires --render-mode rounded".into());
+    }
+    let line_options = LineArtOptions {
+        foreground: match args.foreground.as_str() {
+            "dark" => Foreground::Dark,
+            "light" => Foreground::Light,
+            "alpha" => Foreground::Alpha,
+            _ => Foreground::Auto,
+        },
+        threshold: args.threshold,
+        crop: args.crop,
+        min_region_area: args.min_region_area,
     };
-    let (out_cols, out_rows, cell_descriptors) = clipping::process_scene(&scene, &grid_opts);
+    let canvas = if args.render_mode == "rounded" {
+        if args.charset != "lines" || args.font.is_some() || !args.custom_chars.is_empty() {
+            return Err(
+                "rounded mode constructs its fixed ─│╭╮╰╯ alphabet; omit charset/font/custom-chars"
+                    .into(),
+            );
+        }
+        let mut canvas = line_art::rounded_canvas(&bytes, &line_options, args.width, args.height)?;
+        if args.invert {
+            for cell in &mut canvas.cells {
+                cell.color = Some("#342314".into());
+            }
+        }
+        canvas
+    } else {
+        // 2. Decode to a smoothed PolylineScene: skeleton extraction (Zhang-Suen,
+        // via vectomancy-raster) followed by RDP simplification + Chaikin
+        // smoothing so pixel-grid jitter doesn't fragment the subcell mask.
+        let smoothing = SmoothingOptions {
+            tolerance: args.tolerance,
+            chaikin_iters: args.chaikin_iters,
+        };
+        let mut scene = if args.render_mode == "centerline" {
+            let scene = line_art::centerline_scene(&bytes, &line_options)?;
+            // Validate before the shared clipping code allocates the grid.
+            line_art::grid_size(args.width, args.height, scene.dimensions)?;
+            adapter::smooth_scene(&scene, &smoothing)
+        } else {
+            adapter::raster_to_smoothed_scene(&bytes, true, &smoothing)
+                .map_err(|e| format!("Failed to decode image: {e}"))?
+        };
 
-    // 4. Generate GlyphAtlas
-    let atlas = build_atlas(&args.charset, &args.custom_chars, &args.font)?;
+        if args.invert {
+            scene = adapter::invert_scene_colors(&scene);
+        }
 
-    // 5. Match glyphs using the 6-factor scoring formula (mask/topology/
-    // orientation/density/centroid/curvature) over a Top-K candidate pool
-    // refined across several Neighbor Relaxation rounds, weighted per the
-    // selected preset, plus an optional frequency bias (--glyph-mode).
-    let mut weights = resolve_preset(&args.preset)?;
-    weights.frequency_bias = resolve_frequency_bias(&args.glyph_mode)?;
-    let match_options = MatchOptions {
-        top_k: args.top_k,
-        relaxation_rounds: args.relaxation_rounds,
+        // 3. Setup Subcell grid clipping (Liang-Barsky segment clipping)
+        let (columns, rows) = if args.render_mode == "centerline" {
+            let (w, h) = line_art::grid_size(args.width, args.height, scene.dimensions)?;
+            (Some(w), Some(h))
+        } else {
+            (args.width, args.height)
+        };
+        let grid_opts = GridOptions {
+            columns,
+            rows,
+            ..Default::default()
+        };
+        let (w, h) = grid_opts.resolve_dimensions(scene.dimensions);
+        if w > 4096 || h > 4096 || w.checked_mul(h).is_none_or(|n| n > 4_194_304) {
+            return Err("grid exceeds 4096 per axis or 4 million cells".into());
+        }
+        let (out_cols, out_rows, cell_descriptors) = clipping::process_scene(&scene, &grid_opts);
+
+        // 4. Generate GlyphAtlas
+        let atlas = build_atlas(&args.charset, &args.custom_chars, &args.font)?;
+
+        // 5. Match glyphs using the 6-factor scoring formula (mask/topology/
+        // orientation/density/centroid/curvature) over a Top-K candidate pool
+        // refined across several Neighbor Relaxation rounds, weighted per the
+        // selected preset, plus an optional frequency bias (--glyph-mode).
+        let mut weights = resolve_preset(&args.preset)?;
+        weights.frequency_bias = resolve_frequency_bias(&args.glyph_mode)?;
+        let match_options = MatchOptions {
+            top_k: args.top_k,
+            relaxation_rounds: args.relaxation_rounds,
+        };
+        matching::match_scene_indexed(
+            out_cols,
+            out_rows,
+            &cell_descriptors,
+            &atlas.glyphs,
+            Some(&atlas.index),
+            &weights,
+            &match_options,
+        )
     };
-    let canvas = matching::match_scene_indexed(
-        out_cols,
-        out_rows,
-        &cell_descriptors,
-        &atlas.glyphs,
-        Some(&atlas.index),
-        &weights,
-        &match_options,
-    );
-
+    let canvas = if args.trim || args.padding > 0 {
+        line_art::trim_canvas(&canvas, args.padding)?
+    } else {
+        canvas
+    };
     // 6. Encode and output
-    match args.output_format.as_str() {
+    let encoded = match args.output_format.as_str() {
         "text" => {
             if args.no_color {
                 PlainTextEncoder::new()
@@ -375,6 +467,22 @@ fn run_render(args: RenderArgs) -> Result<Vec<u8>, String> {
         other => Err(format!(
             "Invalid --output-format '{other}': expected 'text', 'html', 'debug-svg', or 'json'"
         )),
+    }?;
+    if args.no_color
+        && args.output_format == "text"
+        && (args.trim || args.padding > 0)
+        && args.padding == 0
+    {
+        let text = String::from_utf8(encoded).map_err(|e| e.to_string())?;
+        Ok((text
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n")
+            .into_bytes())
+    } else {
+        Ok(encoded)
     }
 }
 
@@ -874,7 +982,7 @@ fn main() -> ExitCode {
         },
         other => {
             let result = match other {
-                Command::Render(args) => run_render(args),
+                Command::Render(args) => run_render(*args),
                 Command::Atlas(args) => run_atlas(args),
                 #[cfg(feature = "video")]
                 Command::Video(_) => unreachable!("handled above"),
@@ -921,6 +1029,36 @@ mod tests {
         assert!(!help.contains("topoglyph-docs"));
         assert!(!help.contains("TODO.md"));
         assert!(!help.contains("RenderArgs::"));
+    }
+
+    #[test]
+    fn rounded_options_parse_and_reject_invalid_values() {
+        assert!(Cli::try_parse_from([
+            "topoglyph",
+            "render",
+            "input.png",
+            "--render-mode",
+            "rounded",
+            "--threshold",
+            "65",
+            "--crop",
+            "--trim"
+        ])
+        .is_ok());
+        for value in ["0", "256", "-1"] {
+            assert!(Cli::try_parse_from([
+                "topoglyph",
+                "render",
+                "input.png",
+                "--threshold",
+                value
+            ])
+            .is_err());
+        }
+        assert!(
+            Cli::try_parse_from(["topoglyph", "render", "input.png", "--render-mode", "typo"])
+                .is_err()
+        );
     }
 
     #[test]

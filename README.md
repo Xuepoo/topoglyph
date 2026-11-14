@@ -111,3 +111,59 @@ The project utilizes a multi-crate Workspace structure, divided into:
 ## License
 
 This project is licensed under the MIT License.
+## Clean line art and rounded contours
+
+Static `render` has two opt-in pipelines; the default `--render-mode match`
+keeps the existing edge extraction and glyph matching behavior.
+
+```sh
+# Closed, connected contours: only space and ─ │ ╭ ╮ ╰ ╯; no font needed.
+topoglyph render portrait.png --render-mode rounded -W 160 -H 80 \
+  --threshold 65 --crop --trim --no-color > portrait.txt
+
+# Thin the foreground ink itself, avoiding Sobel's double stroke edges.
+# This still uses the existing atlas matcher; diagonal/branch glyphs are allowed.
+topoglyph render portrait.png --render-mode centerline -W 160 -H 80 \
+  --crop --trim --no-color > portrait-centerline.txt
+
+# Transparent light-colored logos automatically use alpha coverage.
+topoglyph render logo.png --render-mode rounded --crop --trim --no-color
+```
+
+`--foreground auto` uses alpha coverage if any transparency exists, otherwise
+it selects dark ink on white. Override with `dark`, `light` (light ink on dark),
+or `alpha`. Dark/light modes multiply ink coverage by alpha, ignoring hidden
+RGB in transparent pixels. `--threshold 1..255` selects minimum coverage
+(default 128); lower values, such as 65, preserve thinner strokes after resizing.
+These foreground controls apply only to rounded/centerline modes.
+
+`--crop` crops the foreground before sizing. `--trim` crops blank output cells;
+`--padding N` implies trimming and adds a uniform margin. Unpadded plain text
+with `--trim --no-color` also removes trailing spaces. Blank trimmed output is
+one blank cell. Explicit rounded dimensions describe the full output canvas;
+trimming can reduce them. One omitted dimension respects a 1:2 character aspect
+ratio. Grid limits are 4096 per axis and four million cells; the line-art input
+limit is sixteen million decoded pixels.
+
+Rounded mode builds region boundaries globally rather than choosing each glyph
+independently. Ambiguous diagonal contacts merge locally so all cardinal ports
+connect, including closed loops and holes. It preserves the two boundaries of
+thick strokes; it does **not** produce a single centerline. Very close strokes
+can merge after downsampling, and diagonal edges become rounded stair steps.
+The charset/font options are rejected in this fixed-alphabet mode. Color is a
+uniform `#CBDCEB` (or its inverse with `--invert`), not source sampling.
+
+Centerline mode thresholds the foreground, applies Zhang–Suen thinning, traces
+the skeleton graph, then uses the normal smoothing/matching pipeline. It is
+suited to monochrome drawings; fully filled shapes collapse to a skeleton,
+not their outer silhouette. Isolated single pixels are omitted during path
+tracing. It does not guarantee the closed/no-slash properties of rounded mode.
+
+Both pipelines support text, HTML, debug SVG and JSON via the usual output
+encoders. These options currently apply to static images, not video frames.
+
+Optional `--min-region-area 3` in rounded mode removes foreground components
+and fills enclosed background holes smaller than three coverage-grid cells,
+before resolving diagonal contacts. Default `0` preserves every region. This
+can remove pinholes/specks but may remove similarly small intentional details;
+exterior background is never filled. The unit is grid cells, not source pixels.
